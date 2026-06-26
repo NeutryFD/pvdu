@@ -1,0 +1,4 @@
+/build/
+/pvdu-scanner
+/cmd/pvdu/pvdu-scanner
+*.exe
