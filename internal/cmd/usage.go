@@ -24,6 +24,8 @@ var (
 	outputFormat string
 	noTUI        bool
 	tempPodImage string
+	workers      int
+	reportFiles  bool
 )
 
 var usageCmd = &cobra.Command{
@@ -48,6 +50,8 @@ func init() {
 	usageCmd.Flags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json, yaml, wide)")
 	usageCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Skip Bubble Tea UI, print final table directly")
 	usageCmd.Flags().StringVarP(&tempPodImage, "image", "i", "alpine:latest", "Image for temp pods")
+	usageCmd.Flags().IntVarP(&workers, "workers", "w", 0, "Scanner workers (0 = auto)")
+	usageCmd.Flags().BoolVar(&reportFiles, "files", false, "Report individual file sizes in scan output")
 	usageCmd.Flags().SortFlags = false
 }
 
@@ -160,7 +164,7 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 
 	if len(pvcInfo.Mounts) > 0 {
 		mount := pvcInfo.Mounts[0]
-		sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, mount.PodName, mount.MountPath, &pvcInfo, maxDepth, excludes)
+		sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, mount.PodName, mount.MountPath, &pvcInfo, maxDepth, excludes, workers, reportFiles)
 		if err != nil {
 			result.Status = model.StatusError
 			result.Error = err.Error()
@@ -197,7 +201,7 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 			return
 		}
 
-		sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, podName, "/mnt", &pvcInfo, maxDepth, excludes)
+		sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, podName, "/mnt", &pvcInfo, maxDepth, excludes, workers, reportFiles)
 		k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
 
 		if err != nil {
