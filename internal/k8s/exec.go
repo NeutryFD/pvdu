@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
+	"github.com/neutry/dirwalker"
 	"github.com/neutry/pvdu/internal/model"
-	"github.com/neutry/pvdu/internal/scanner"
 )
 
 var ScannerBinary []byte
@@ -26,7 +26,7 @@ type scanLine struct {
 	Human string `json:"human,omitempty"`
 }
 
-func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, namespace, podName, mountPath string, pvcInfo *PVCInfo, maxDepth int, excludes []string) (*model.ScanResult, error) {
+func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, namespace, podName, mountPath string, pvcInfo *PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
 	result := &model.ScanResult{
 		Namespace:      pvcInfo.Namespace,
 		PVCName:        pvcInfo.Name,
@@ -49,10 +49,15 @@ func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, confi
 	}
 
 	depthStr := fmt.Sprintf("%d", maxDepth)
+	workersStr := fmt.Sprintf("%d", workers)
+	filesStr := ""
+	if reportFiles {
+		filesStr = "--files"
+	}
 
 	execCmd := []string{"sh", "-c",
-		fmt.Sprintf("cat > /tmp/pvdu-scanner && chmod +x /tmp/pvdu-scanner && /tmp/pvdu-scanner --path=%s --max-depth=%s --exclude=%s",
-			mountPath, depthStr, excludeStr),
+		fmt.Sprintf("cat > /tmp/pvdu-scanner && chmod +x /tmp/pvdu-scanner && /tmp/pvdu-scanner %s --max-depth=%s --exclude=%s --workers=%s %s",
+			mountPath, depthStr, excludeStr, workersStr, filesStr),
 	}
 
 	stdout, stderr, err := ExecInPodStream(ctx, clientset, config, namespace, podName, "", execCmd, bytes.NewReader(ScannerBinary))
@@ -122,7 +127,7 @@ func parseScannerOutput(output string) (int64, error) {
 	return total, nil
 }
 
-func ParseScannerProgress(output string, progressFn scanner.ProgressFn) int64 {
+func ParseScannerProgress(output string, progressFn dirwalker.ProgressFn) int64 {
 	dec := json.NewDecoder(bytes.NewReader([]byte(output)))
 	var total int64
 	for {
@@ -136,8 +141,9 @@ func ParseScannerProgress(output string, progressFn scanner.ProgressFn) int64 {
 		}
 		if line.Type == "done" {
 			total = line.Size
-		} else if line.Type == "progress" && progressFn != nil {
-			progressFn(line.Path, line.Size)
+		} else if progressFn != nil {
+			isDir := line.Type == "progress" || line.Type == "dir"
+			progressFn(line.Path, line.Size, isDir)
 		}
 	}
 	return total
