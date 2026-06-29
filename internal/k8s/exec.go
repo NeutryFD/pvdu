@@ -26,7 +26,7 @@ type scanLine struct {
 	Human string `json:"human,omitempty"`
 }
 
-func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, namespace, podName, mountPath string, pvcInfo *PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
+func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, namespace, podName, containerName, writableDir, mountPath string, pvcInfo *PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
 	result := &model.ScanResult{
 		Namespace:      pvcInfo.Namespace,
 		PVCName:        pvcInfo.Name,
@@ -55,12 +55,17 @@ func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, confi
 		filesStr = "--files"
 	}
 
+	scannerPath := writableDir + "/.pvdu-scanner"
+	if excludeStr != "" {
+		excludeStr += ","
+	}
+	excludeStr += ".pvdu-scanner"
 	execCmd := []string{"sh", "-c",
-		fmt.Sprintf("cat > /tmp/pvdu-scanner && chmod +x /tmp/pvdu-scanner && /tmp/pvdu-scanner %s --max-depth=%s --exclude=%s --workers=%s %s",
-			mountPath, depthStr, excludeStr, workersStr, filesStr),
+		fmt.Sprintf("cat > %s && chmod +x %s && %s %s --max-depth=%s --exclude=%s --workers=%s --output=json-lines %s; rc=$?; rm -f %s; exit $rc",
+			scannerPath, scannerPath, scannerPath, mountPath, depthStr, excludeStr, workersStr, filesStr, scannerPath),
 	}
 
-	stdout, stderr, err := ExecInPodStream(ctx, clientset, config, namespace, podName, "", execCmd, bytes.NewReader(ScannerBinary))
+	stdout, stderr, err := ExecInPodStream(ctx, clientset, config, namespace, podName, containerName, execCmd, bytes.NewReader(ScannerBinary))
 	if err != nil {
 		result.Status = model.StatusError
 		result.Error = fmt.Sprintf("exec error: %v (stderr: %s)", err, stderr)
