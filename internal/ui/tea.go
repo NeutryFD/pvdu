@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/neutry/dirwalker"
 	"github.com/neutry/pvdu/internal/model"
 )
 
@@ -62,17 +63,17 @@ func (m *modelUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case model.ProgressUpdate:
 		m.mu.Lock()
 		if msg.Err != "" {
-			m.lines[msg.PVCName] = fmt.Sprintf("%s  error: %s", msg.PVCName, msg.Err)
-		} else if msg.Done {
-			m.lines[msg.PVCName] = fmt.Sprintf("%s  done  %s", msg.PVCName, formatBytesShort(msg.Size))
+			m.lines[msg.PVCName] = fmt.Sprintf("%s  error", msg.PVCName)
+		} else 		if msg.Done {
+			m.lines[msg.PVCName] = fmt.Sprintf("%s  done  %s", msg.PVCName, dirwalker.FormatBytesShort(msg.Size))
 		} else {
-			m.lines[msg.PVCName] = fmt.Sprintf("%s  scanning...  %s  %s", msg.PVCName, msg.Path, formatBytesShort(msg.Size))
+			m.lines[msg.PVCName] = fmt.Sprintf("%s  %s", msg.PVCName, msg.Path)
 		}
 		m.mu.Unlock()
 		return m, nil
 	case model.ScanDoneMsg:
 		m.state = stateDone
-		return m, nil
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -121,7 +122,9 @@ func RenderTable(results []*model.ScanResult) string {
 
 	colWidths := map[string]int{
 		"ns":   12,
+		"pod":  24,
 		"pvc":  24,
+		"path": 24,
 		"req":  12,
 		"pv":   12,
 		"used": 12,
@@ -132,8 +135,18 @@ func RenderTable(results []*model.ScanResult) string {
 		if len(r.Namespace) > colWidths["ns"] {
 			colWidths["ns"] = len(r.Namespace)
 		}
+		podName := r.PodName
+		if podName == "" {
+			podName = "-"
+		}
+		if len(podName) > colWidths["pod"] {
+			colWidths["pod"] = len(podName)
+		}
 		if len(r.PVCName) > colWidths["pvc"] {
 			colWidths["pvc"] = len(r.PVCName)
+		}
+		if len(r.ScanPath) > colWidths["path"] {
+			colWidths["path"] = len(r.ScanPath)
 		}
 	}
 
@@ -147,7 +160,7 @@ func RenderTable(results []*model.ScanResult) string {
 
 	sep := func() {
 		fmt.Fprintf(&b, "+")
-		for _, w := range []int{colWidths["ns"], colWidths["pvc"], colWidths["req"], colWidths["pv"], colWidths["used"], colWidths["pct"]} {
+		for _, w := range []int{colWidths["ns"], colWidths["pod"], colWidths["pvc"], colWidths["path"], colWidths["req"], colWidths["pv"], colWidths["used"], colWidths["pct"]} {
 			fmt.Fprintf(&b, "%s+", strings.Repeat("-", w+2))
 		}
 		fmt.Fprintf(&b, "\n")
@@ -179,7 +192,9 @@ func RenderTable(results []*model.ScanResult) string {
 	sep()
 	row(
 		center("NAMESPACE", colWidths["ns"]),
+		rpad("POD", colWidths["pod"]),
 		center("PVC", colWidths["pvc"]),
+		rpad("PATH", colWidths["path"]),
 		rpad("REQUESTED", colWidths["req"]),
 		rpad("PV SIZE", colWidths["pv"]),
 		rpad("USED", colWidths["used"]),
@@ -187,30 +202,42 @@ func RenderTable(results []*model.ScanResult) string {
 	)
 	sep()
 
+	var errs []string
 	for _, r := range results {
+		podStr := r.PodName
+		if podStr == "" {
+			podStr = "-"
+		}
+		pathStr := r.ScanPath
+		if pathStr == "" {
+			pathStr = "-"
+		}
 		req := r.RequestedStr
 		if req == "" {
 			req = "-"
 		}
 		pvStr := "-"
 		if r.PVBytes > 0 {
-			pvStr = formatBytesShort(r.PVBytes)
+			pvStr = dirwalker.FormatBytesShort(r.PVBytes)
 		}
 		usedStr := "-"
 		pctStr := "-"
 		if r.Status == model.StatusDone && r.UsedBytes >= 0 {
-			usedStr = formatBytesShort(r.UsedBytes)
+			usedStr = dirwalker.FormatBytesShort(r.UsedBytes)
 			if r.RequestedBytes > 0 {
 				pct := float64(r.UsedBytes) / float64(r.RequestedBytes) * 100
 				pctStr = fmt.Sprintf("%.0f%%", pct)
 			}
 		} else if r.Status == model.StatusError {
 			usedStr = "ERROR"
+			errs = append(errs, fmt.Sprintf("  %s/%s: %s", r.Namespace, r.PVCName, r.Error))
 		}
 
 		row(
-			r.Namespace,
-			r.PVCName,
+			rpad(r.Namespace, colWidths["ns"]),
+			rpad(podStr, colWidths["pod"]),
+			rpad(r.PVCName, colWidths["pvc"]),
+			rpad(pathStr, colWidths["path"]),
 			lpad(req, colWidths["req"]),
 			lpad(pvStr, colWidths["pv"]),
 			lpad(usedStr, colWidths["used"]),
@@ -219,18 +246,12 @@ func RenderTable(results []*model.ScanResult) string {
 	}
 	sep()
 
-	return hdrStyle.Render(b.String())
-}
+	if len(errs) > 0 {
+		fmt.Fprintf(&b, "\nErrors:\n")
+		for _, e := range errs {
+			fmt.Fprintf(&b, "%s\n", e)
+		}
+	}
 
-func formatBytesShort(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%ci", float64(b)/float64(div), "KMGTPE"[exp])
+	return hdrStyle.Render(b.String())
 }
