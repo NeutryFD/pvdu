@@ -10,8 +10,9 @@ import (
 )
 
 type PodMount struct {
-	PodName   string
-	MountPath string
+	PodName       string
+	ContainerName string
+	MountPath     string
 }
 
 type PVCInfo struct {
@@ -113,8 +114,9 @@ func findPodsByPVC(ctx context.Context, clientset kubernetes.Interface, namespac
 				for _, vm := range c.VolumeMounts {
 					if vm.Name == vol.Name {
 						mounts = append(mounts, PodMount{
-							PodName:   pod.Name,
-							MountPath: vm.MountPath,
+							PodName:       pod.Name,
+							ContainerName: c.Name,
+							MountPath:     vm.MountPath,
 						})
 					}
 				}
