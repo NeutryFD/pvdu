@@ -1,6 +1,8 @@
 # pvdu — PVC Disk Usage
 
-Real storage usage of Kubernetes PVCs. Compares requested capacity, PV size, and actual filesystem usage via a parallel `WalkDir` scanner uploaded to pods.
+Real storage usage of Kubernetes PVCs. Compares requested capacity, PV size, and actual filesystem usage via a parallel directory scanner uploaded to pods.
+
+Built on [dirwalker](https://github.com/NeutryFD/dirwalker) — a parallel, depth-aware directory scanner.
 
 ## Quick start
 
@@ -30,6 +32,20 @@ make build
 | `--context` | | Kubernetes context |
 | `--kubeconfig` | | Path to kubeconfig |
 
+## Output formats
+
+```
+./build/pvdu -n default           # TUI with live progress
+./build/pvdu -n default --no-tui  # Table to stdout
+./build/pvdu -n default -o json   # JSON array of results
+./build/pvdu -n default -o yaml   # YAML output
+```
+
 ## Build
 
-`make build` produces `build/dirwalker` (standalone scanner) and `build/pvdu` (with scanner embedded).
+```bash
+make build    # builds both dirwalker (scanner) and pvdu binaries
+make test     # runs unit + integration tests
+```
+
+`make build` downloads the [dirwalker](https://github.com/NeutryFD/dirwalker) module automatically — no manual clone needed.
