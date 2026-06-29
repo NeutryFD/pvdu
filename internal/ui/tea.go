@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/neutry/dirwalker"
+	"github.com/NeutryFD/dirwalker"
 	"github.com/neutry/pvdu/internal/model"
 )
 

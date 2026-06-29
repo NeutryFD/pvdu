@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"github.com/neutry/dirwalker"
+	"github.com/NeutryFD/dirwalker"
 	"github.com/neutry/pvdu/internal/model"
 )
 

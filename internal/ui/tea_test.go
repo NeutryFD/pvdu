@@ -17,6 +17,10 @@ func stripANSI(s string) string {
 }
 
 func TestRenderTable_Done(t *testing.T) {
+	results := []*model.ScanResult{
+		{
+			Namespace:      "default",
+			PVCName:        "data-test-0",
 			PodName:        "pod-test-0",
 			ScanPath:       "/data",
 			RequestedBytes: 10 * 1024 * 1024 * 1024,
