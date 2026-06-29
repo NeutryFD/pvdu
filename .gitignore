@@ -3,3 +3,4 @@
 /cmd/pvdu/pvdu-scanner
 /cmd/pvdu/dirwalker
 *.exe
+/pvdu
