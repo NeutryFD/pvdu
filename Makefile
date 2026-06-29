@@ -8,7 +8,7 @@ build: scanner pvdu
 # Build scanner binary to BIN_DIR
 scanner:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/neutry/dirwalker/cmd/dirwalker
+	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/NeutryFD/dirwalker/cmd/dirwalker
 
 # Build pvdu (reads scanner binary from build/ at runtime)
 pvdu:
@@ -26,5 +26,5 @@ test: scanner
 
 # Quick rebuild (scanner + pvdu)
 quick:
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/neutry/dirwalker/cmd/dirwalker
+	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/NeutryFD/dirwalker/cmd/dirwalker
 	CGO_ENABLED=0 go build -o $(BIN_DIR)/pvdu ./cmd/pvdu/
