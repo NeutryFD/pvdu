@@ -11,14 +11,16 @@ const (
 )
 
 type ScanResult struct {
-	Namespace      string
-	PVCName        string
-	RequestedBytes int64
-	RequestedStr   string
-	PVBytes        int64
-	UsedBytes      int64
-	Status         ScanStatus
-	Error          string
+	Namespace      string     `json:"namespace"`
+	PVCName        string     `json:"pvc_name"`
+	PodName        string     `json:"pod_name,omitempty"`
+	ScanPath       string     `json:"scan_path"`
+	RequestedBytes int64      `json:"requested_bytes"`
+	RequestedStr   string     `json:"requested_str"`
+	PVBytes        int64      `json:"pv_bytes"`
+	UsedBytes      int64      `json:"used_bytes"`
+	Status         ScanStatus `json:"status"`
+	Error          string     `json:"error,omitempty"`
 }
 
 type ScanProgress struct {
