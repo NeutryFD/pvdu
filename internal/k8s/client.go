@@ -25,6 +25,9 @@ func BuildClient(kubeconfig, context string) (kubernetes.Interface, *rest.Config
 		return nil, nil, err
 	}
 
+	config.QPS = 50
+	config.Burst = 100
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, nil, err
