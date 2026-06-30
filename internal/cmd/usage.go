@@ -45,7 +45,7 @@ func init() {
 	rootCmd.AddCommand(usageCmd)
 
 	rootCmd.PersistentFlags().BoolVarP(&force, "force", "f", false, "Auto-create temp pod, skip confirmation")
-	rootCmd.PersistentFlags().DurationVarP(&timeout, "timeout", "t", 30*time.Second, "Timeout for temp pod creation + scan")
+	rootCmd.PersistentFlags().DurationVarP(&timeout, "timeout", "t", 120*time.Second, "Timeout for temp pod creation + scan")
 	rootCmd.PersistentFlags().IntVarP(&concurrency, "concurrency", "c", 3, "Max parallel PVC scans")
 	rootCmd.PersistentFlags().IntVarP(&maxDepth, "max-depth", "d", 0, "Directory depth for scanner (0 = unlimited)")
 	rootCmd.PersistentFlags().StringSliceVarP(&excludes, "exclude", "e", nil, "Paths to exclude from scan (repeatable)")
@@ -222,7 +222,7 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 	podName, err := k8s.CreateTempPod(ctx, clientset, pvcInfo.Namespace, pvcInfo.Name, tempPodImage)
 	if err != nil {
 		result.Status = model.StatusError
-		result.Error = fmt.Sprintf("create temp pod: %v", err)
+		result.Error = fmt.Sprintf("create temp pod: %v (try --timeout/-t)", err)
 		slog.Error("create temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
@@ -234,7 +234,7 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 	if err != nil {
 		k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
 		result.Status = model.StatusError
-		result.Error = fmt.Sprintf("wait pod: %v", err)
+		result.Error = fmt.Sprintf("wait pod: %v (try --timeout/-t)", err)
 		slog.Error("wait temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
