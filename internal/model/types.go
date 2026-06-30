@@ -23,33 +23,10 @@ type ScanResult struct {
 	Error          string     `json:"error,omitempty"`
 }
 
-type ScanProgress struct {
-	PVCName string
-	Path    string
-	Size    int64
-	Human   string
-	Done    bool
-}
-
 type OutputFormat string
 
 const (
 	FormatTable OutputFormat = "table"
 	FormatJSON  OutputFormat = "json"
 	FormatYAML  OutputFormat = "yaml"
-	FormatWide  OutputFormat = "wide"
 )
-
-type ProgressUpdate struct {
-	PVCName string
-	Path    string
-	Size    int64
-	Done    bool
-	Err     string
-}
-
-type DiscoveredMsg struct {
-	Count int
-}
-
-type ScanDoneMsg struct{}
