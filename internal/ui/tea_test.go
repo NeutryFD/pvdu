@@ -405,6 +405,70 @@ func TestRenderTable_BoundaryPercentage(t *testing.T) {
 	}
 }
 
+func TestRenderDefault_Done(t *testing.T) {
+	results := []*model.ScanResult{
+		{
+			Namespace:      "default",
+			PVCName:        "data-test-0",
+			PodName:        "pod-test-0",
+			ScanPath:       "/data",
+			RequestedBytes: 10 * 1024 * 1024 * 1024,
+			RequestedStr:   "10Gi",
+			PVBytes:        10 * 1024 * 1024 * 1024,
+			UsedBytes:      5 * 1024 * 1024 * 1024,
+			Status:         model.StatusDone,
+		},
+	}
+
+	out := RenderDefault(results)
+
+	if !strings.Contains(out, "default") {
+		t.Errorf("output should contain namespace")
+	}
+	if !strings.Contains(out, "data-test-0") {
+		t.Errorf("output should contain PVC name")
+	}
+	if !strings.Contains(out, "pod-test-0") {
+		t.Errorf("output should contain pod name")
+	}
+	if !strings.Contains(out, "/data") {
+		t.Errorf("output should contain scan path")
+	}
+	if !strings.Contains(out, "5.0Gi") {
+		t.Errorf("output should contain used bytes")
+	}
+	if !strings.Contains(out, "50%") {
+		t.Errorf("output should contain percentage")
+	}
+}
+
+func TestRenderDefault_NoBorders(t *testing.T) {
+	results := []*model.ScanResult{
+		{
+			Namespace:      "default",
+			PVCName:        "data-test",
+			PodName:        "pod-test",
+			ScanPath:       "/data",
+			RequestedBytes: 1024,
+			RequestedStr:   "1.0Ki",
+			PVBytes:        1024,
+			UsedBytes:      512,
+			Status:         model.StatusDone,
+		},
+	}
+
+	out := RenderDefault(results)
+
+	if strings.Contains(out, "|") {
+		t.Errorf("default output should not contain pipe characters")
+	}
+	if strings.Contains(out, "+") || strings.Contains(out, "-") {
+		if strings.Contains(out, "+-") || strings.HasPrefix(out, "+") {
+			t.Errorf("default output should not contain table borders")
+		}
+	}
+}
+
 func TestRenderTable_NoRequestedBytes(t *testing.T) {
 	results := []*model.ScanResult{
 		{
