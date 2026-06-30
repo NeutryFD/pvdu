@@ -25,9 +25,10 @@ func CreateTempPod(ctx context.Context, clientset kubernetes.Interface, namespac
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:    "scanner",
-					Image:   image,
-					Command: []string{"sh", "-c", "sleep infinity"},
+					Name:            "scanner",
+					Image:           image,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					Command:         []string{"sh", "-c", "sleep infinity"},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "pvc",
