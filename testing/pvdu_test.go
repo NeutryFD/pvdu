@@ -114,35 +114,22 @@ func TestNoArgs(t *testing.T) {
 func TestInvalidOutputFormat(t *testing.T) {
 	bin := buildBinary(t)
 
-	_, stderr, err := runPvdu(t, bin, "--no-tui", "-o", "invalid")
+	_, stderr, err := runPvdu(t, bin, "-o", "invalid")
 	if err != nil {
 		t.Fatalf("pvdu with invalid format should not error, got: %v\nstderr: %s", err, stderr)
-	}
-}
-
-func TestNoTuiFlag(t *testing.T) {
-	bin := buildBinary(t)
-
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui")
-	if err != nil {
-		t.Fatalf("pvdu --no-tui failed: %v\nstderr: %s", err, stderr)
-	}
-
-	if strings.Contains(stdout, "Bubble Tea") {
-		t.Errorf("--no-tui output should not contain TUI keywords")
 	}
 }
 
 func TestForceFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-f")
+	stdout, stderr, err := runPvdu(t, bin, "-f")
 	if err != nil {
-		t.Fatalf("pvdu --no-tui -f should not error, got: %v\nstderr: %s", err, stderr)
+		t.Fatalf("pvdu -f should not error, got: %v\nstderr: %s", err, stderr)
 	}
 
 	if stdout == "" {
-		t.Log("expected table output, got empty stdout")
+		t.Log("expected output, got empty stdout")
 	}
 }
 
@@ -153,7 +140,7 @@ func isNoPVCs(out string) bool {
 func TestJSONOutput(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-o", "json")
+	stdout, stderr, err := runPvdu(t, bin, "-o", "json")
 	if err != nil {
 		t.Fatalf("pvdu -o json failed: %v\nstderr: %s", err, stderr)
 	}
@@ -173,7 +160,7 @@ func TestJSONOutput(t *testing.T) {
 func TestYAMLOutput(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-o", "yaml")
+	stdout, stderr, err := runPvdu(t, bin, "-o", "yaml")
 	if err != nil {
 		t.Fatalf("pvdu -o yaml failed: %v\nstderr: %s", err, stderr)
 	}
@@ -190,10 +177,10 @@ func TestYAMLOutput(t *testing.T) {
 	t.Logf("parsed %d PVC results", len(parsed))
 }
 
-func TestTableOutputHasHeader(t *testing.T) {
+func TestDefaultOutputHasHeader(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-o", "table")
+	stdout, stderr, err := runPvdu(t, bin)
 	if err != nil {
 		t.Fatalf("pvdu -o table failed: %v\nstderr: %s", err, stderr)
 	}
@@ -203,23 +190,23 @@ func TestTableOutputHasHeader(t *testing.T) {
 	}
 
 	if !strings.Contains(stdout, "NAMESPACE") {
-		t.Errorf("table output should contain 'NAMESPACE' header")
+		t.Errorf("default output should contain 'NAMESPACE' header")
 	}
 	if !strings.Contains(stdout, "PVC") {
-		t.Errorf("table output should contain 'PVC' header")
+		t.Errorf("default output should contain 'PVC' header")
 	}
 	if !strings.Contains(stdout, "REQUESTED") {
-		t.Errorf("table output should contain 'REQUESTED' header")
+		t.Errorf("default output should contain 'REQUESTED' header")
 	}
 	if !strings.Contains(stdout, "USED") {
-		t.Errorf("table output should contain 'USED' header")
+		t.Errorf("default output should contain 'USED' header")
 	}
 }
 
 func TestConcurrencyFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-c", "1")
+	stdout, stderr, err := runPvdu(t, bin, "-c", "1")
 	if err != nil {
 		t.Fatalf("pvdu -c 1 failed: %v\nstderr: %s", err, stderr)
 	}
@@ -232,7 +219,7 @@ func TestConcurrencyFlag(t *testing.T) {
 func TestMaxDepthFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-d", "1")
+	stdout, stderr, err := runPvdu(t, bin, "-d", "1")
 	if err != nil {
 		t.Fatalf("pvdu -d 1 failed: %v\nstderr: %s", err, stderr)
 	}
@@ -245,7 +232,7 @@ func TestMaxDepthFlag(t *testing.T) {
 func TestTimeoutFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	_, stderr, err := runPvdu(t, bin, "--no-tui", "-t", "10s")
+	_, stderr, err := runPvdu(t, bin, "-t", "10s")
 	if err != nil {
 		t.Fatalf("pvdu -t 10s failed: %v\nstderr: %s", err, stderr)
 	}
@@ -254,7 +241,7 @@ func TestTimeoutFlag(t *testing.T) {
 func TestAllNamespacesShortFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-A")
+	stdout, stderr, err := runPvdu(t, bin, "-A")
 	if err != nil {
 		t.Fatalf("pvdu -A failed: %v\nstderr: %s", err, stderr)
 	}
@@ -267,7 +254,7 @@ func TestAllNamespacesShortFlag(t *testing.T) {
 func TestWorkersFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-w", "4")
+	stdout, stderr, err := runPvdu(t, bin, "-w", "4")
 	if err != nil {
 		t.Fatalf("pvdu -w 4 failed: %v\nstderr: %s", err, stderr)
 	}
@@ -280,7 +267,7 @@ func TestWorkersFlag(t *testing.T) {
 func TestExcludeFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-e", "*.tmp")
+	stdout, stderr, err := runPvdu(t, bin, "-e", "*.tmp")
 	if err != nil {
 		t.Fatalf("pvdu -e failed: %v\nstderr: %s", err, stderr)
 	}
@@ -293,7 +280,7 @@ func TestExcludeFlag(t *testing.T) {
 func TestMultipleExcludeFlags(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, stderr, err := runPvdu(t, bin, "--no-tui", "-e", "*.tmp", "-e", "*.log")
+	stdout, stderr, err := runPvdu(t, bin, "-e", "*.tmp", "-e", "*.log")
 	if err != nil {
 		t.Fatalf("pvdu -e multiple failed: %v\nstderr: %s", err, stderr)
 	}
@@ -306,7 +293,7 @@ func TestMultipleExcludeFlags(t *testing.T) {
 func TestContextFlag(t *testing.T) {
 	bin := buildBinary(t)
 
-	stdout, _, err := runPvdu(t, bin, "--no-tui", "--context", "nonexistent")
+	stdout, _, err := runPvdu(t, bin, "--context", "nonexistent")
 	if err == nil {
 		t.Log("note: pvdu succeeded with nonexistent context (may have no kubeconfig)")
 	}
