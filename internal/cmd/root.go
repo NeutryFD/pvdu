@@ -15,6 +15,7 @@ var (
 	namespace     string
 	allNamespaces bool
 	logLevel      string
+	pvcName       string
 )
 
 var rootCmd = &cobra.Command{
@@ -62,4 +63,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "", "Kubernetes namespace")
 	rootCmd.PersistentFlags().BoolVarP(&allNamespaces, "all-namespaces", "A", false, "Scan all namespaces")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVarP(&pvcName, "pvc", "p", "", "PVC name to scan")
 }
