@@ -1,19 +1,18 @@
 package main
 
 import (
+	_ "embed"
 	"os"
-	"path/filepath"
 
 	"github.com/neutry/pvdu/internal/cmd"
 	"github.com/neutry/pvdu/internal/k8s"
 )
 
+//go:embed dirwalker
+var scannerBinary []byte
+
 func main() {
-	scannerPath := filepath.Join("build", "dirwalker")
-	data, err := os.ReadFile(scannerPath)
-	if err == nil {
-		k8s.ScannerBinary = data
-	}
+	k8s.ScannerBinary = scannerBinary
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
 	}

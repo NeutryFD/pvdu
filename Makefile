@@ -1,30 +1,21 @@
-.PHONY: build clean scanner pvdu run test
+.PHONY: build clean scanner run test
 
 BIN_DIR := build
 
-# Build both scanner and pvdu
-build: scanner pvdu
-
-# Build scanner binary to BIN_DIR
-scanner:
-	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/NeutryFD/dirwalker/cmd/dirwalker
-
-# Build pvdu (reads scanner binary from build/ at runtime)
-pvdu:
+build: scanner
 	CGO_ENABLED=0 go build -o $(BIN_DIR)/pvdu ./cmd/pvdu/
+	rm -f cmd/pvdu/dirwalker
 
-# Run pvdu with args
+scanner:
+	@mkdir -p cmd/pvdu
+	CGO_ENABLED=0 go build -o cmd/pvdu/dirwalker github.com/NeutryFD/dirwalker/cmd/dirwalker
+
 run: build
 	$(BIN_DIR)/pvdu $(ARGS)
 
-clean:
-	rm -rf $(BIN_DIR)
-
 test: scanner
 	go test ./internal/... ./testing/...
+	rm -f cmd/pvdu/dirwalker
 
-# Quick rebuild (scanner + pvdu)
-quick:
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/dirwalker github.com/NeutryFD/dirwalker/cmd/dirwalker
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/pvdu ./cmd/pvdu/
+clean:
+	rm -rf $(BIN_DIR) cmd/pvdu/dirwalker
