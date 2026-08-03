@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -40,29 +41,11 @@ func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, confi
 		return nil, fmt.Errorf("scanner binary not embedded (run make build)")
 	}
 
-	excludeStr := ""
-	for i, e := range excludes {
-		if i > 0 {
-			excludeStr += ","
-		}
-		excludeStr += e
-	}
-
-	depthStr := fmt.Sprintf("%d", maxDepth)
-	workersStr := fmt.Sprintf("%d", workers)
-	filesStr := ""
-	if reportFiles {
-		filesStr = "--files"
-	}
-
 	scannerPath := writableDir + "/.pvdu-scanner"
-	if excludeStr != "" {
-		excludeStr += ","
-	}
-	excludeStr += ".pvdu-scanner"
-	execCmd := []string{"sh", "-c",
-		fmt.Sprintf("cat > %s && chmod +x %s && %s %s --max-depth=%s --exclude=%s --workers=%s --output=json-lines %s; rc=$?; rm -f %s; exit $rc",
-			scannerPath, scannerPath, scannerPath, mountPath, depthStr, excludeStr, workersStr, filesStr, scannerPath),
+
+	execCmd, err := ScannerExecCommand(scannerPath, mountPath, maxDepth, excludes, workers, reportFiles)
+	if err != nil {
+		return nil, err
 	}
 
 	stdout, stderr, err := ExecInPodStream(ctx, clientset, config, namespace, podName, containerName, execCmd, bytes.NewReader(ScannerBinary))
@@ -82,6 +65,42 @@ func UploadAndScanPVC(ctx context.Context, clientset kubernetes.Interface, confi
 	result.UsedBytes = used
 	result.Status = model.StatusDone
 	return result, nil
+}
+
+// ScannerExecCommand builds the argv for the in-pod scan. The sh -c script is a
+// fixed constant; every dynamic value (scanner path, mount path, excludes, ...)
+// is passed as a positional parameter ($1..$6) so pod-spec-controlled values
+// can never be parsed as shell code.
+func ScannerExecCommand(scannerPath, mountPath string, maxDepth int, excludes []string, workers int, reportFiles bool) ([]string, error) {
+	for _, e := range excludes {
+		if strings.ContainsRune(e, ',') || strings.ContainsRune(e, '\n') {
+			return nil, fmt.Errorf("exclude pattern %q contains a comma or newline, which the scanner uses as the exclude separator", e)
+		}
+	}
+
+	excludeStr := strings.Join(excludes, ",")
+	if excludeStr != "" {
+		excludeStr += ","
+	}
+	excludeStr += ".pvdu-scanner"
+
+	filesStr := ""
+	if reportFiles {
+		filesStr = "--files"
+	}
+
+	script := `cat > "$1" && chmod +x "$1" && "$1" "$2" --max-depth="$3" --exclude="$4" --workers="$5" --output=json-lines $6; rc=$?; rm -f "$1"; exit $rc`
+
+	return []string{
+		"sh", "-c", script,
+		"pvdu-sh",          // $0
+		scannerPath,        // $1
+		mountPath,          // $2
+		fmt.Sprintf("%d", maxDepth), // $3
+		excludeStr,         // $4
+		fmt.Sprintf("%d", workers),  // $5
+		filesStr,           // $6
+	}, nil
 }
 
 func ExecInPodStream(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, namespace, podName, container string, cmd []string, stdin io.Reader) (string, string, error) {
