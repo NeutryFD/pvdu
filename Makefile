@@ -17,6 +17,7 @@ test: test-unit test-integration
 
 test-unit:
 	go test ./internal/...
+	go test ./testing/ -run 'Pod|ScannerExecCommand'
 
 test-integration: scanner
 	go test ./testing/...
