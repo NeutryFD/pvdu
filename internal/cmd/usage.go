@@ -14,22 +14,32 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/NeutryFD/dirwalker"
 	"github.com/neutry/pvdu/internal/k8s"
 	"github.com/neutry/pvdu/internal/model"
 	"github.com/neutry/pvdu/internal/ui"
-	"github.com/NeutryFD/dirwalker"
 )
 
 var (
-	force             bool
-	timeout           time.Duration
-	concurrency       int
-	maxDepth          int
-	excludes          []string
-	outputFormat      string
-	tempPodImage      string
-	workers           int
-	reportFiles       bool
+	force        bool
+	timeout      time.Duration
+	concurrency  int
+	maxDepth     int
+	excludes     []string
+	outputFormat string
+	tempPodImage string
+	workers      int
+	reportFiles  bool
+)
+
+var (
+	buildClient     = k8s.BuildClient
+	listPVCs        = k8s.ListPVCs
+	getPVCByName    = k8s.GetPVCByName
+	createTempPod   = k8s.CreateTempPod
+	waitForPodReady = k8s.WaitForPodReady
+	deletePod       = k8s.DeletePod
+	uploadAndScan   = k8s.UploadAndScanPVC
 )
 
 var usageCmd = &cobra.Command{
@@ -47,7 +57,7 @@ func init() {
 	rootCmd.AddCommand(usageCmd)
 
 	rootCmd.PersistentFlags().BoolVarP(&force, "force", "f", false, "Auto-create temp pod, skip confirmation")
-	rootCmd.PersistentFlags().DurationVarP(&timeout, "timeout", "t", 120*time.Second, "Timeout for temp pod creation + scan")
+	rootCmd.PersistentFlags().DurationVarP(&timeout, "timeout", "t", 120*time.Second, "Timeout per PVC for pod setup and scan")
 	rootCmd.PersistentFlags().IntVarP(&concurrency, "concurrency", "c", 3, "Max parallel PVC scans")
 	rootCmd.PersistentFlags().IntVarP(&maxDepth, "max-depth", "d", 0, "Directory depth for scanner (0 = unlimited)")
 	rootCmd.PersistentFlags().StringSliceVarP(&excludes, "exclude", "e", nil, "Paths to exclude from scan (repeatable)")
@@ -67,7 +77,7 @@ func runUsage(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	clientset, config, err := k8s.BuildClient(kubeconfig, ctx)
+	clientset, config, err := buildClient(kubeconfig, ctx)
 	if err != nil {
 		return fmt.Errorf("build k8s client: %w", err)
 	}
@@ -89,13 +99,13 @@ func runUsage(cmd *cobra.Command, args []string) error {
 		if targetNs == "" {
 			targetNs = "default"
 		}
-		info, err := k8s.GetPVCByName(ctxBg, clientset, targetNs, pvc)
+		info, err := getPVCByName(ctxBg, clientset, targetNs, pvc)
 		if err != nil {
 			return fmt.Errorf("get PVC: %w", err)
 		}
 		pvcs = []k8s.PVCInfo{*info}
 	} else {
-		pvcs, err = k8s.ListPVCs(ctxBg, clientset, ns)
+		pvcs, err = listPVCs(ctxBg, clientset, ns)
 		if err != nil {
 			return fmt.Errorf("list PVCs: %w", err)
 		}
@@ -184,8 +194,11 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 		mount := pvcInfo.Mounts[0]
 		slog.Debug("using existing pod mount", "pod", mount.PodName, "container", mount.ContainerName, "path", mount.MountPath)
 
+		scanCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
 		scanWithWritableDir := func(writableDir string) (*model.ScanResult, error) {
-			return k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, mount.PodName, mount.ContainerName, writableDir, mount.MountPath, &pvcInfo, maxDepth, excludes, workers, reportFiles)
+			return uploadAndScan(scanCtx, clientset, config, pvcInfo.Namespace, mount.PodName, mount.ContainerName, writableDir, mount.MountPath, &pvcInfo, maxDepth, excludes, workers, reportFiles)
 		}
 
 		sr, err := scanWithWritableDir("/tmp")
@@ -202,7 +215,7 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 			if force {
 				scanWithTempPod(ctx, clientset, config, result, pvcInfo, idx)
 			} else {
-				reportError(err.Error())
+				reportError(timeoutHint(scanCtx, err.Error()))
 			}
 			return
 		}
@@ -216,7 +229,7 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 			if force {
 				scanWithTempPod(ctx, clientset, config, result, pvcInfo, idx)
 			} else {
-				reportError(sr.Error)
+				reportError(timeoutHint(scanCtx, sr.Error))
 			}
 			return
 		}
@@ -228,6 +241,13 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 	scanWithTempPod(ctx, clientset, config, result, pvcInfo, idx)
 }
 
+func timeoutHint(c context.Context, fallback string) string {
+	if c.Err() != nil {
+		return fmt.Sprintf("timed out after %s (try --timeout/-t)", timeout)
+	}
+	return fallback
+}
+
 func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvcInfo k8s.PVCInfo, idx int) {
 	scanPath := "/mnt"
 	if len(pvcInfo.Mounts) > 0 {
@@ -235,18 +255,31 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 	}
 	slog.Debug("creating temp pod", "image", tempPodImage, "scanPath", scanPath)
 
+	opCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	sendProgress(idx, result.PVCName, "creating pod", 0, false, "")
-	podName, err := k8s.CreateTempPod(ctx, clientset, pvcInfo.Namespace, pvcInfo.Name, tempPodImage)
+	podName, err := createTempPod(opCtx, clientset, pvcInfo.Namespace, pvcInfo.Name, tempPodImage)
 	if err != nil {
+		if opCtx.Err() != nil {
+			result.Status = model.StatusError
+			result.Error = timeoutHint(opCtx, "")
+			sendProgress(idx, result.PVCName, "", 0, true, result.Error)
+			return
+		}
 		result.Status = model.StatusError
 		result.Error = fmt.Sprintf("create temp pod: %v (try --timeout/-t)", err)
 		slog.Error("create temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
 	}
-	defer k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
+	defer func() {
+		if err := deletePod(context.Background(), clientset, pvcInfo.Namespace, podName); err != nil {
+			slog.Error("delete temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "pod", podName, "error", err)
+		}
+	}()
 
-	err = k8s.WaitForPodReady(ctx, clientset, pvcInfo.Namespace, podName, timeout)
+	err = waitForPodReady(opCtx, clientset, pvcInfo.Namespace, podName, timeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			result.Status = model.StatusError
@@ -254,7 +287,7 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 			return
 		}
 		result.Status = model.StatusError
-		result.Error = fmt.Sprintf("wait pod: %v (try --timeout/-t)", err)
+		result.Error = timeoutHint(opCtx, fmt.Sprintf("wait pod: %v (try --timeout/-t)", err))
 		slog.Error("wait temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
@@ -262,7 +295,7 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 
 	slog.Debug("temp pod ready, uploading scanner")
 	sendProgress(idx, result.PVCName, "scanning "+scanPath, 0, false, "")
-	sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, podName, "scanner", "/tmp", "/mnt", &pvcInfo, maxDepth, excludes, workers, reportFiles)
+	sr, err := uploadAndScan(opCtx, clientset, config, pvcInfo.Namespace, podName, "scanner", "/tmp", "/mnt", &pvcInfo, maxDepth, excludes, workers, reportFiles)
 
 	if ctx.Err() != nil {
 		result.Status = model.StatusError
@@ -272,7 +305,7 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 
 	if err != nil {
 		result.Status = model.StatusError
-		result.Error = err.Error()
+		result.Error = timeoutHint(opCtx, err.Error())
 		slog.Error("scan in temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
@@ -280,9 +313,9 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 	result.UsedBytes = sr.UsedBytes
 	result.Status = sr.Status
 	if sr.Status == model.StatusError {
-		result.Error = sr.Error
+		result.Error = timeoutHint(opCtx, sr.Error)
 		slog.Error("scan in temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", sr.Error)
-		sendProgress(idx, result.PVCName, "", 0, true, sr.Error)
+		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
 	}
 	slog.Debug("scan complete", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "usedBytes", result.UsedBytes)

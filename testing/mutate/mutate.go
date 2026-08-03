@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type mutation struct {
@@ -157,7 +159,9 @@ func main() {
 }
 
 func runTests(repo, cmd string) bool {
-	c := exec.Command("sh", "-c", cmd)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, "sh", "-c", cmd)
 	c.Dir = repo
 	c.Env = os.Environ()
 	var buf bytes.Buffer
