@@ -1,4 +1,4 @@
-.PHONY: build clean scanner run test
+.PHONY: build clean scanner run test test-unit test-integration
 
 BIN_DIR := build
 
@@ -13,8 +13,13 @@ scanner:
 run: build
 	$(BIN_DIR)/pvdu $(ARGS)
 
-test: scanner
-	go test ./internal/... ./testing/...
+test: test-unit test-integration
+
+test-unit:
+	go test ./internal/...
+
+test-integration: scanner
+	go test ./testing/...
 	rm -f cmd/pvdu/dirwalker
 
 clean:
