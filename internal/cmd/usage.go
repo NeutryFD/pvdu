@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -78,7 +80,8 @@ func runUsage(cmd *cobra.Command, args []string) error {
 		ns = "default"
 	}
 
-	ctxBg := context.Background()
+	ctxBg, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	var pvcs []k8s.PVCInfo
 
 	if pvc != "" {
@@ -123,6 +126,11 @@ func runUsage(cmd *cobra.Command, args []string) error {
 	initProgress(pvcNames)
 	scanAll(ctxBg, clientset, config, results, pvcs)
 	finishProgress()
+
+	if ctxBg.Err() != nil {
+		fmt.Fprintln(os.Stderr, "interrupted")
+		return ctxBg.Err()
+	}
 
 	switch outputFormat {
 	case "json":
@@ -186,6 +194,11 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 			sr, err = scanWithWritableDir(mount.MountPath)
 		}
 		if err != nil {
+			if ctx.Err() != nil {
+				result.Status = model.StatusError
+				result.Error = "interrupted"
+				return
+			}
 			if force {
 				scanWithTempPod(ctx, clientset, config, result, pvcInfo, idx)
 			} else {
@@ -196,6 +209,10 @@ func scanPVC(ctx context.Context, clientset kubernetes.Interface, config *rest.C
 		result.UsedBytes = sr.UsedBytes
 		result.Status = sr.Status
 		if sr.Status == model.StatusError {
+			if ctx.Err() != nil {
+				result.Error = "interrupted"
+				return
+			}
 			if force {
 				scanWithTempPod(ctx, clientset, config, result, pvcInfo, idx)
 			} else {
@@ -227,12 +244,15 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 		sendProgress(idx, result.PVCName, "", 0, true, result.Error)
 		return
 	}
+	defer k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
 
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	err = k8s.WaitForPodReady(waitCtx, clientset, pvcInfo.Namespace, podName, timeout)
-	cancel()
+	err = k8s.WaitForPodReady(ctx, clientset, pvcInfo.Namespace, podName, timeout)
 	if err != nil {
-		k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
+		if ctx.Err() != nil {
+			result.Status = model.StatusError
+			result.Error = "interrupted"
+			return
+		}
 		result.Status = model.StatusError
 		result.Error = fmt.Sprintf("wait pod: %v (try --timeout/-t)", err)
 		slog.Error("wait temp pod failed", "namespace", pvcInfo.Namespace, "pvc", pvcInfo.Name, "error", err)
@@ -243,7 +263,12 @@ func scanWithTempPod(ctx context.Context, clientset kubernetes.Interface, config
 	slog.Debug("temp pod ready, uploading scanner")
 	sendProgress(idx, result.PVCName, "scanning "+scanPath, 0, false, "")
 	sr, err := k8s.UploadAndScanPVC(ctx, clientset, config, pvcInfo.Namespace, podName, "scanner", "/tmp", "/mnt", &pvcInfo, maxDepth, excludes, workers, reportFiles)
-	k8s.DeletePod(context.Background(), clientset, pvcInfo.Namespace, podName)
+
+	if ctx.Err() != nil {
+		result.Status = model.StatusError
+		result.Error = "interrupted"
+		return
+	}
 
 	if err != nil {
 		result.Status = model.StatusError
