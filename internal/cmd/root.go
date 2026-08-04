@@ -51,6 +51,9 @@ func Execute() error {
 }
 
 func init() {
+	if version == "" {
+		version = "dev"
+	}
 	rootCmd.Version = version
 
 	klog.InitFlags(nil)

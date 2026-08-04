@@ -2,6 +2,9 @@
 
 BIN_DIR := build
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+ifeq ($(strip $(VERSION)),)
+override VERSION := dev
+endif
 LDFLAGS := -ldflags "-X github.com/neutry/pvdu/internal/cmd.version=$(VERSION)"
 
 build: scanner
