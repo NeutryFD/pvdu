@@ -42,20 +42,7 @@ var (
 	uploadAndScan   = k8s.UploadAndScanPVC
 )
 
-var usageCmd = &cobra.Command{
-	Use:   "usage [pvc <name>]",
-	Short: "Show real storage usage of PVCs",
-	Long: `Show real storage usage of PVCs by comparing PVC requested size, PV capacity,
-and actual filesystem usage from a WalkDir scan.
-
-Scans all PVCs in the namespace, or a specific PVC if name is provided.`,
-	Args: cobra.MaximumNArgs(2),
-	RunE: runUsage,
-}
-
 func init() {
-	rootCmd.AddCommand(usageCmd)
-
 	rootCmd.PersistentFlags().BoolVarP(&force, "force", "f", false, "Auto-create temp pod, skip confirmation")
 	rootCmd.PersistentFlags().DurationVarP(&timeout, "timeout", "t", 120*time.Second, "Timeout per PVC for pod setup and scan")
 	rootCmd.PersistentFlags().IntVarP(&concurrency, "concurrency", "c", 3, "Max parallel PVC scans")

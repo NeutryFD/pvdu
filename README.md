@@ -12,14 +12,14 @@ Built on [dirwalker](https://github.com/NeutryFD/dirwalker) — a parallel, dept
 
 ```bash
 make build
-./build/pvdu usage -n default
-./build/pvdu usage -n default -o table
-./build/pvdu usage -n monitoring -p data-thanos-receive-0
-./build/pvdu usage -n monitoring -f -i nicolaka/netshoot
-./build/pvdu usage -A --concurrency=10
+./build/pvdu -n default
+./build/pvdu -n default -o table
+./build/pvdu -n monitoring -p data-thanos-receive-0
+./build/pvdu -n monitoring -f -i nicolaka/netshoot
+./build/pvdu -A --concurrency=10
 ```
 
-## Usage flags
+## Flags
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
