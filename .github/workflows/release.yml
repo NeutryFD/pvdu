@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binary
+        run: make build
+
+      - name: Unit tests
+        run: make test-unit
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          python3 - "${{ github.ref_name }}" <<'PYEOF'
+          import re, sys
+          tag = sys.argv[1]
+          text = open('CHANGELOG.md').read()
+          sections = re.split(r'^## ', text, flags=re.M)
+          for s in sections:
+              if s.startswith(f'[{tag}]'):
+                  with open('release-notes.md', 'w') as f:
+                      f.write('## ' + s.rstrip() + '\n')
+                  break
+          else:
+              with open('release-notes.md', 'w') as f:
+                  f.write('See CHANGELOG.md for the full log of features and changes.\n')
+          PYEOF
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            build/pvdu \
+            --title "pvdu ${{ github.ref_name }}" \
+            --notes-file release-notes.md
