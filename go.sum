@@ -1,7 +1,5 @@
-github.com/NeutryFD/dirwalker v0.1.0 h1:4Jn2ykmDDSNRSBCTYuZb0TBF4jUu4tdzzOKcvd9pdOQ=
-github.com/NeutryFD/dirwalker v0.1.0/go.mod h1:1lH5nnvcOzLBWEwuQTDL5NGspyQCLy5yVopgwexjPqU=
-github.com/NeutryFD/dirwalker v0.2.1 h1:Wst75apJxO5A+T8i9tyr+qW2dCcVnBAnx8HwnYulMro=
-github.com/NeutryFD/dirwalker v0.2.1/go.mod h1:1lH5nnvcOzLBWEwuQTDL5NGspyQCLy5yVopgwexjPqU=
+github.com/NeutryFD/dirwalker v0.3.0 h1:PoIx6m5eXOpAgN5ONiutv8rlcWcMvcqs4ePXbmT0LjA=
+github.com/NeutryFD/dirwalker v0.3.0/go.mod h1:1lH5nnvcOzLBWEwuQTDL5NGspyQCLy5yVopgwexjPqU=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
