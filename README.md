@@ -38,6 +38,7 @@ make build
 | `--kubeconfig` | | | Path to kubeconfig file |
 | `--output` | `-o` | `default` | Output format: `default`, `table`, `json`, `yaml` |
 | `--log-level` | | | Log level: `debug`, `info`, `warn`, `error` |
+| `--version` | | | Print version and exit |
 
 ## Output formats
 

@@ -85,6 +85,22 @@ func TestHelpShortFlag(t *testing.T) {
 	}
 }
 
+func TestVersionFlag(t *testing.T) {
+	bin := buildBinary(t)
+
+	stdout, stderr, err := runPvdu(t, bin, "--version")
+	if err != nil {
+		t.Fatalf("pvdu --version failed: %v\nstderr: %s", err, stderr)
+	}
+
+	if !strings.Contains(stdout, "pvdu") {
+		t.Errorf("--version output should contain 'pvdu'")
+	}
+	if !strings.Contains(stdout, "version") {
+		t.Errorf("--version output should contain 'version'")
+	}
+}
+
 func TestUnknownFlag(t *testing.T) {
 	bin := buildBinary(t)
 
