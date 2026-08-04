@@ -1,9 +1,11 @@
 .PHONY: build clean scanner run test test-unit test-integration
 
 BIN_DIR := build
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -ldflags "-X github.com/neutry/pvdu/internal/cmd.version=$(VERSION)"
 
 build: scanner
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/pvdu ./cmd/pvdu/
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BIN_DIR)/pvdu ./cmd/pvdu/
 	rm -f cmd/pvdu/dirwalker
 
 scanner:

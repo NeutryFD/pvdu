@@ -16,6 +16,7 @@ var (
 	allNamespaces bool
 	logLevel      string
 	pvcName       string
+	version       = "dev"
 )
 
 var rootCmd = &cobra.Command{
@@ -50,6 +51,8 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.Version = version
+
 	klog.InitFlags(nil)
 	if fl := flag.Lookup("logtostderr"); fl != nil {
 		fl.Value.Set("false")
