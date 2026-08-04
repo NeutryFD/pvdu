@@ -63,50 +63,72 @@ func TestScannerJSONLinesSchema(t *testing.T) {
 		"sub/deep/c": 100,
 	})
 
-	stdout, stderr, err := runPvdu(t, bin, root, "--output=json-lines", "--files")
-	if err != nil {
-		t.Fatalf("dirwalker scan failed: %v\nstderr: %s", err, stderr)
+	cases := []struct {
+		name      string
+		extraArgs []string
+		wantHuman bool
+	}{
+		{name: "machine-only", wantHuman: false},
+		{name: "with-human", extraArgs: []string{"--human"}, wantHuman: true},
 	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			args := append([]string{root, "--output=json-lines", "--files"}, c.extraArgs...)
+			stdout, stderr, err := runPvdu(t, bin, args...)
+			if err != nil {
+				t.Fatalf("dirwalker scan failed: %v\nstderr: %s", err, stderr)
+			}
 
-	var doneLines int
-	var gotTotal int64
-	lineCount := 0
-	for _, raw := range strings.Split(strings.TrimSpace(stdout), "\n") {
-		if raw == "" {
-			continue
-		}
-		lineCount++
-		var line scanLine
-		if err := json.Unmarshal([]byte(raw), &line); err != nil {
-			t.Fatalf("line %d is not valid under pvdu scanLine schema: %v\nraw: %s", lineCount, err, raw)
-		}
-		if line.Type == "done" {
-			doneLines++
-			gotTotal = line.Size
-			continue
-		}
-		if line.Type != "file" && line.Type != "dir" {
-			t.Errorf("line %d: unexpected type %q", lineCount, line.Type)
-		}
-		if line.Path == "" {
-			t.Errorf("line %d: missing path", lineCount)
-		}
-		if line.Size < 0 {
-			t.Errorf("line %d: negative size %d", lineCount, line.Size)
-		}
-		if line.Human == "" {
-			t.Errorf("line %d: missing human size", lineCount)
-		}
-	}
+			var doneLines int
+			var gotTotal int64
+			lineCount := 0
+			for _, raw := range strings.Split(strings.TrimSpace(stdout), "\n") {
+				if raw == "" {
+					continue
+				}
+				lineCount++
+				var line scanLine
+				if err := json.Unmarshal([]byte(raw), &line); err != nil {
+					t.Fatalf("line %d is not valid under pvdu scanLine schema: %v\nraw: %s", lineCount, err, raw)
+				}
+				if line.Type == "done" {
+					doneLines++
+					gotTotal = line.Size
+					if c.wantHuman && line.Human == "" {
+						t.Errorf("line %d: expected human total with --human", lineCount)
+					}
+					if !c.wantHuman && line.Human != "" {
+						t.Errorf("line %d: human total should be omitted without --human", lineCount)
+					}
+					continue
+				}
+				if line.Type != "file" && line.Type != "dir" {
+					t.Errorf("line %d: unexpected type %q", lineCount, line.Type)
+				}
+				if line.Path == "" {
+					t.Errorf("line %d: missing path", lineCount)
+				}
+				if line.Size < 0 {
+					t.Errorf("line %d: negative size %d", lineCount, line.Size)
+				}
+				if c.wantHuman && line.Human == "" {
+					t.Errorf("line %d: expected human size with --human", lineCount)
+				}
+				if !c.wantHuman && line.Human != "" {
+					t.Errorf("line %d: human size should be omitted without --human", lineCount)
+				}
+			}
 
-	if doneLines != 1 {
-		t.Errorf("expected exactly one 'done' line, got %d", doneLines)
-	}
-	if gotTotal != wantTotal {
-		t.Errorf("done.size = %d, want %d (sum of fixture files)", gotTotal, wantTotal)
-	}
-	if stdout == "" {
-		t.Fatal("expected some output lines")
+			if doneLines != 1 {
+				t.Errorf("expected exactly one 'done' line, got %d", doneLines)
+			}
+			if gotTotal != wantTotal {
+				t.Errorf("done.size = %d, want %d (sum of fixture files)", gotTotal, wantTotal)
+			}
+			if stdout == "" {
+				t.Fatal("expected some output lines")
+			}
+		})
 	}
 }
 
