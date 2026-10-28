@@ -6,12 +6,13 @@ import (
 
 	"github.com/neutry/pvdu/internal/k8s"
 	"github.com/neutry/pvdu/internal/model"
+	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-// TestingHooks replaces external operations while the real command path runs.
-// A nil field keeps the production implementation.
+// TestingHooks is a deprecated compatibility adapter. New tests should construct
+// independent commands with NewCommand and Dependencies instead of global hooks.
 type TestingHooks struct {
 	BuildClient     func(string, string) (kubernetes.Interface, *rest.Config, error)
 	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error)
@@ -22,74 +23,54 @@ type TestingHooks struct {
 	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
 }
 
-func setTestingHooks(h TestingHooks) func() {
-	previous := TestingHooks{
-		BuildClient:     buildClient,
-		ListPVCs:        listPVCs,
-		GetPVCByName:    getPVCByName,
-		CreateTempPod:   createTempPod,
-		WaitForPodReady: waitForPodReady,
-		DeletePod:       deletePod,
-		UploadAndScan:   uploadAndScan,
-	}
-	if h.BuildClient != nil {
-		buildClient = h.BuildClient
-	}
-	if h.ListPVCs != nil {
-		listPVCs = h.ListPVCs
-	}
-	if h.GetPVCByName != nil {
-		getPVCByName = h.GetPVCByName
-	}
+// Legacy test state is never consulted by production commands.
+var legacyHooks TestingHooks
+var legacyOptions = defaultOptions()
+
+func SetTestingHooks(h TestingHooks) func() {
+	previous := legacyHooks
+	legacyHooks = h
+	return func() { legacyHooks = previous }
+}
+func SetTestingOptions(timeout time.Duration, concurrency int) func() {
+	previous := legacyOptions
+	legacyOptions.timeout, legacyOptions.concurrency = timeout, concurrency
+	return func() { legacyOptions = previous }
+}
+
+func legacyRunner() *runner {
+	h := legacyHooks
+	d := Dependencies{BuildClient: h.BuildClient, ListPVCs: h.ListPVCs, GetPVCByName: h.GetPVCByName, WaitForPodReady: h.WaitForPodReady, UploadAndScan: h.UploadAndScan}
 	if h.CreateTempPod != nil {
-		createTempPod = h.CreateTempPod
-	}
-	if h.WaitForPodReady != nil {
-		waitForPodReady = h.WaitForPodReady
+		d.CreatePod = func(ctx context.Context, client kubernetes.Interface, pvc k8s.PVCInfo, image string) (k8s.PodRef, error) {
+			name, err := h.CreateTempPod(ctx, client, pvc.Namespace, pvc.Name, image)
+			return k8s.PodRef{Name: name}, err
+		}
 	}
 	if h.DeletePod != nil {
-		deletePod = h.DeletePod
+		d.DeletePod = func(ctx context.Context, client kubernetes.Interface, ns string, pod k8s.PodRef) error {
+			return h.DeletePod(ctx, client, ns, pod.Name)
+		}
 	}
-	if h.UploadAndScan != nil {
-		uploadAndScan = h.UploadAndScan
-	}
-	return func() {
-		buildClient = previous.BuildClient
-		listPVCs = previous.ListPVCs
-		getPVCByName = previous.GetPVCByName
-		createTempPod = previous.CreateTempPod
-		waitForPodReady = previous.WaitForPodReady
-		deletePod = previous.DeletePod
-		uploadAndScan = previous.UploadAndScan
-	}
+	r := newRunner(d)
+	r.options = legacyOptions
+	return r
 }
 
-// SetTestingHooks installs dependency hooks for external tests and returns a restore function.
-func SetTestingHooks(h TestingHooks) func() { return setTestingHooks(h) }
-
-// SetTestingOptions temporarily changes command options needed by deterministic tests.
-func SetTestingOptions(operationTimeout time.Duration, scanConcurrency int) func() {
-	previousTimeout, previousConcurrency, previousKubeconfig := timeout, concurrency, kubeconfig
-	timeout, concurrency = operationTimeout, scanConcurrency
-	kubeconfig = "__pvdu_missing_test_kubeconfig__"
-	return func() {
-		timeout, concurrency = previousTimeout, previousConcurrency
-		kubeconfig = previousKubeconfig
+func RunTempPodScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo) {
+	legacyRunner().scanWithTempPod(ctx, client, config, result, pvc)
+}
+func RunPVCScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo, force bool) {
+	r := legacyRunner()
+	r.options.force = force
+	r.scanPVC(ctx, client, config, result, pvc)
+}
+func RunUsageForTesting(args ...string) error {
+	r := legacyRunner()
+	if len(args) > 0 {
+		r.options.pvc = args[len(args)-1]
 	}
+	c := &cobra.Command{}
+	c.SetContext(context.Background())
+	return r.run(c)
 }
-
-// RunTempPodScanForTesting invokes the production temporary-pod scan path.
-func RunTempPodScanForTesting(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo) {
-	scanWithTempPod(ctx, clientset, config, result, pvc, 0)
-}
-
-// RunPVCScanForTesting invokes the production PVC branch-selection path.
-func RunPVCScanForTesting(ctx context.Context, clientset kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo, forceMode bool) {
-	previous := force
-	force = forceMode
-	scanPVC(ctx, clientset, config, result, pvc, 0)
-	force = previous
-}
-
-// RunUsageForTesting invokes the production command orchestration path.
-func RunUsageForTesting(args ...string) error { return runUsage(nil, args) }
