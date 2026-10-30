@@ -43,9 +43,25 @@ func findRepoRoot(t *testing.T) string {
 	}
 }
 
+// e2eEnabled reports whether tests may talk to a real cluster. It is opt-in so
+// a developer's own kubeconfig is never scanned by accident.
+func e2eEnabled() bool { return os.Getenv("PVDU_E2E") == "1" }
+
+// requireCluster skips tests that need a reachable cluster unless PVDU_E2E=1.
+func requireCluster(t *testing.T) {
+	t.Helper()
+	if !e2eEnabled() {
+		t.Skip("needs a cluster; set PVDU_E2E=1 to run")
+	}
+}
+
 func runPvdu(t *testing.T, bin string, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), bin, args...)
+	if !e2eEnabled() {
+		// Point at a missing file so nothing can reach an ambient cluster.
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+filepath.Join(t.TempDir(), "no-kubeconfig"))
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -116,6 +132,7 @@ func TestUnknownFlag(t *testing.T) {
 }
 
 func TestNoArgs(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin)
@@ -141,6 +158,7 @@ func TestInvalidOutputFormat(t *testing.T) {
 }
 
 func TestForceFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-f")
@@ -158,6 +176,7 @@ func isNoPVCs(out string) bool {
 }
 
 func TestJSONOutput(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-o", "json")
@@ -178,6 +197,7 @@ func TestJSONOutput(t *testing.T) {
 }
 
 func TestYAMLOutput(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-o", "yaml")
@@ -198,6 +218,7 @@ func TestYAMLOutput(t *testing.T) {
 }
 
 func TestDefaultOutputHasHeader(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin)
@@ -224,6 +245,7 @@ func TestDefaultOutputHasHeader(t *testing.T) {
 }
 
 func TestConcurrencyFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-c", "1")
@@ -237,6 +259,7 @@ func TestConcurrencyFlag(t *testing.T) {
 }
 
 func TestMaxDepthFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-d", "1")
@@ -250,6 +273,7 @@ func TestMaxDepthFlag(t *testing.T) {
 }
 
 func TestTimeoutFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	_, stderr, err := runPvdu(t, bin, "-t", "10s")
@@ -259,6 +283,7 @@ func TestTimeoutFlag(t *testing.T) {
 }
 
 func TestAllNamespacesShortFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-A")
@@ -272,6 +297,7 @@ func TestAllNamespacesShortFlag(t *testing.T) {
 }
 
 func TestWorkersFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-w", "4")
@@ -285,6 +311,7 @@ func TestWorkersFlag(t *testing.T) {
 }
 
 func TestExcludeFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-e", "*.tmp")
@@ -298,6 +325,7 @@ func TestExcludeFlag(t *testing.T) {
 }
 
 func TestMultipleExcludeFlags(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-e", "*.tmp", "-e", "*.log")
@@ -311,6 +339,7 @@ func TestMultipleExcludeFlags(t *testing.T) {
 }
 
 func TestContextFlag(t *testing.T) {
+	requireCluster(t)
 	bin := buildBinary(t)
 
 	stdout, _, err := runPvdu(t, bin, "--context", "nonexistent")
