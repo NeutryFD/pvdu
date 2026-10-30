@@ -15,6 +15,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the slow KinD job is needed. Lint and unit tests always run.
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      cluster: ${{ steps.filter.outputs.cluster }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh pr diff "$PR" --name-only --repo "$GITHUB_REPOSITORY")
+          # Documentation and Dependabot config never need a cluster.
+          other=$(echo "$files" | grep -Ev '^(.*\.md|LICENSE|\.github/dependabot\.yml)$' || true)
+          # Dependabot Actions bumps only touch workflow files.
+          if [ "$ACTOR" = "dependabot[bot]" ]; then
+            other=$(echo "$other" | grep -Ev '^\.github/workflows/' || true)
+          fi
+          if [ -z "$other" ]; then
+            echo "cluster=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -58,6 +92,8 @@ jobs:
 
   integration:
     name: integration tests (KinD)
+    needs: changes
+    if: ${{ needs.changes.outputs.cluster == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -77,16 +113,17 @@ jobs:
       - name: Integration tests
         run: make test-integration
 
-  # Single required check for branch protection: it fails unless every job above passed.
+  # Single required check for branch protection. A job skipped on purpose (the
+  # KinD job for docs-only changes) is fine; a failed or cancelled one is not.
   ci-success:
     name: ci-success
     if: ${{ always() }}
-    needs: [lint, unit, integration]
+    needs: [changes, lint, unit, integration]
     runs-on: ubuntu-latest
     steps:
       - name: Require all jobs to succeed
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
             echo "One or more required jobs did not succeed."
             exit 1
           fi
