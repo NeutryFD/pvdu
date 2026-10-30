@@ -9,13 +9,13 @@ import (
 )
 
 func TestScannerExecCommand(t *testing.T) {
-	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 3, []string{"*.tmp", "lost+found"}, 4, true)
+	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 3, []string{"*.tmp", "lost+found"}, 4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(cmd) != 11 {
-		t.Fatalf("expected 11 argv elements (sh, -c, script, $0..$7), got %d: %v", len(cmd), cmd)
+	if len(cmd) != 10 {
+		t.Fatalf("expected 10 argv elements (sh, -c, script, $0..$6), got %d: %v", len(cmd), cmd)
 	}
 	if cmd[0] != "sh" || cmd[1] != "-c" {
 		t.Errorf("expected sh -c, got %q %q", cmd[0], cmd[1])
@@ -36,22 +36,21 @@ func TestScannerExecCommand(t *testing.T) {
 		"3",                             // $3 max-depth
 		"*.tmp,lost+found,.pvdu-scan.*", // $4 excludes
 		"4",                             // $5 workers
-		"--files",                       // $6 files
-		"",                              // $7 plain upload
+		"",                              // $6 plain upload
 	}
 	if got := cmd[3:]; !reflect.DeepEqual(got, wantParams) {
 		t.Errorf("positional params mismatch\n got: %v\nwant: %v", got, wantParams)
 	}
 }
 
-func TestScannerExecCommandNoReportFiles(t *testing.T) {
-	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, nil, 0, false)
+func TestScannerExecCommandDefaults(t *testing.T) {
+	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	params := cmd[3:]
 	if params[6] != "" {
-		t.Errorf("expected empty files param, got %q", params[6])
+		t.Errorf("expected plain (empty) encoding param, got %q", params[6])
 	}
 	if params[3] != "0" || params[5] != "0" {
 		t.Errorf("expected depth/workers 0, got %q/%q", params[3], params[5])
@@ -71,7 +70,7 @@ func TestScannerExecCommandNoInjection(t *testing.T) {
 		`/mnt|sh -i`,
 	}
 	for _, m := range malicious {
-		cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", m, 0, nil, 0, false)
+		cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", m, 0, nil, 0)
 		if err != nil {
 			t.Fatalf("mount path %q: unexpected error: %v", m, err)
 		}
@@ -85,7 +84,7 @@ func TestScannerExecCommandNoInjection(t *testing.T) {
 }
 
 func TestScannerExecCommandRejectsCommaExclude(t *testing.T) {
-	_, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"/var/,cache"}, 0, false)
+	_, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"/var/,cache"}, 0)
 	if err == nil {
 		t.Fatal("expected error for comma in exclude pattern")
 	}
@@ -93,7 +92,7 @@ func TestScannerExecCommandRejectsCommaExclude(t *testing.T) {
 		t.Errorf("error should mention comma: %v", err)
 	}
 
-	_, err = scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"ok", "bad\nexclude"}, 0, false)
+	_, err = scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"ok", "bad\nexclude"}, 0)
 	if err == nil {
 		t.Fatal("expected error for newline in exclude pattern")
 	}

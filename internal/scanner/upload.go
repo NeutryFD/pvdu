@@ -29,15 +29,12 @@ type UploadError struct{ Err error }
 func (e *UploadError) Error() string { return "upload scanner: " + e.Err.Error() }
 func (e *UploadError) Unwrap() error { return e.Err }
 
-func UploadAndScan(ctx context.Context, client kubernetes.Interface, config *rest.Config, namespace, podName, containerName, writableDir, mountPath string, pvc *kube.PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
-	if reportFiles {
-		return nil, fmt.Errorf("file-level output is not supported; omit --files")
-	}
-	argv, err := ExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
+func UploadAndScan(ctx context.Context, client kubernetes.Interface, config *rest.Config, namespace, podName, containerName, writableDir, mountPath string, pvc *kube.PVCInfo, maxDepth int, excludes []string, workers int) (*model.ScanResult, error) {
+	argv, err := ExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers)
 	if err != nil {
 		return nil, err
 	}
-	gzipArgv, err := CompressedExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
+	gzipArgv, err := CompressedExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers)
 	if err != nil {
 		return nil, err
 	}

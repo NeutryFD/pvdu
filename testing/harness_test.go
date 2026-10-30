@@ -24,7 +24,7 @@ type hooks struct {
 	CreateTempPod   func(context.Context, kubernetes.Interface, string, string, string) (string, error)
 	WaitForPodReady func(context.Context, kubernetes.Interface, string, string, time.Duration) error
 	DeletePod       func(context.Context, kubernetes.Interface, string, string) error
-	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
+	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error)
 }
 
 func (h hooks) dependencies() cli.Dependencies {
