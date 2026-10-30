@@ -4,22 +4,22 @@ import (
 	"embed"
 	"os"
 
-	"github.com/neutry/pvdu/internal/cmd"
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/cli"
+	"github.com/neutry/pvdu/internal/scanner"
 )
 
 //go:embed scanners/dirwalker-linux-*
 var scanners embed.FS
 
 func main() {
-	k8s.ScannerBinaries = make(map[string][]byte)
+	scanner.Binaries = make(map[string][]byte)
 	for _, arch := range []string{"amd64", "arm64"} {
 		binary, err := scanners.ReadFile("scanners/dirwalker-linux-" + arch)
 		if err == nil {
-			k8s.ScannerBinaries[arch] = binary
+			scanner.Binaries[arch] = binary
 		}
 	}
-	if err := cmd.Execute(); err != nil {
+	if err := cli.Execute(); err != nil {
 		os.Exit(1)
 	}
 }

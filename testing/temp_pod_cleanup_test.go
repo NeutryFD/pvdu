@@ -12,19 +12,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neutry/pvdu/internal/cmd"
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/cli"
+	"github.com/neutry/pvdu/internal/kube"
 	"github.com/neutry/pvdu/internal/model"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
-func testPVC() k8s.PVCInfo { return k8s.PVCInfo{Name: "claim", Namespace: "ns"} }
+func testPVC() kube.PVCInfo { return kube.PVCInfo{Name: "claim", Namespace: "ns"} }
 
 func TestTempPodCleanupSuccess(t *testing.T) {
 	events := []string{}
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) {
 			events = append(events, "create")
 			return "pod", nil
@@ -33,7 +33,7 @@ func TestTempPodCleanupSuccess(t *testing.T) {
 			events = append(events, "ready")
 			return nil
 		},
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			events = append(events, "scan")
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
@@ -44,7 +44,7 @@ func TestTempPodCleanupSuccess(t *testing.T) {
 	})
 	defer restore()
 	result := &model.ScanResult{}
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
 	if strings.Join(events, ",") != "create,ready,scan,delete" || result.Status != model.StatusDone {
 		t.Fatalf("events/result = %v/%#v", events, result)
 	}
@@ -52,14 +52,14 @@ func TestTempPodCleanupSuccess(t *testing.T) {
 
 func TestTempPodCleanupCreateFailureDoesNotDelete(t *testing.T) {
 	deleted := false
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) {
 			return "", errors.New("create failed")
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted = true; return nil },
 	})
 	defer restore()
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
 	if deleted {
 		t.Fatal("delete called after create failed")
 	}
@@ -67,7 +67,7 @@ func TestTempPodCleanupCreateFailureDoesNotDelete(t *testing.T) {
 
 func TestTempPodCleanupReadinessFailure(t *testing.T) {
 	deleted := 0
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error {
 			return errors.New("not ready")
@@ -75,7 +75,7 @@ func TestTempPodCleanupReadinessFailure(t *testing.T) {
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted++; return nil },
 	})
 	defer restore()
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
 	if deleted != 1 {
 		t.Fatalf("delete count = %d", deleted)
 	}
@@ -83,24 +83,24 @@ func TestTempPodCleanupReadinessFailure(t *testing.T) {
 
 func TestTempPodCleanupScanFailure(t *testing.T) {
 	deleted := 0
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			return nil, errors.New("scan failed")
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted++; return nil },
 	})
 	defer restore()
 	result := &model.ScanResult{}
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
 	if deleted != 1 || result.Status != model.StatusError {
 		t.Fatalf("delete/status = %d/%q", deleted, result.Status)
 	}
 }
 
 func TestTempPodCleanupTimeout(t *testing.T) {
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(ctx context.Context, _ kubernetes.Interface, _, _ string, _ time.Duration) error {
 			<-ctx.Done()
@@ -109,10 +109,10 @@ func TestTempPodCleanupTimeout(t *testing.T) {
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { return nil },
 	})
 	defer restore()
-	restoreOptions := cmd.SetTestingOptions(time.Millisecond, 1)
+	restoreOptions := cli.SetTestingOptions(time.Millisecond, 1)
 	defer restoreOptions()
 	result := &model.ScanResult{}
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
 	if result.Status != model.StatusError || !strings.Contains(result.Error, "timed out after") {
 		t.Fatalf("result = %#v", result)
 	}
@@ -122,7 +122,7 @@ func TestTempPodCleanupCancellationUsesBackgroundContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var cleanupCtx context.Context
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error {
 			cancel()
@@ -131,7 +131,7 @@ func TestTempPodCleanupCancellationUsesBackgroundContext(t *testing.T) {
 		DeletePod: func(ctx context.Context, _ kubernetes.Interface, _, _ string) error { cleanupCtx = ctx; return nil },
 	})
 	defer restore()
-	cmd.RunTempPodScanForTesting(ctx, fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
+	cli.RunTempPodScanForTesting(ctx, fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
 	if cleanupCtx == nil || cleanupCtx.Err() != nil {
 		t.Fatalf("cleanup context = %v", cleanupCtx)
 	}
@@ -142,17 +142,17 @@ func TestTempPodCleanupFailureIsDeferredWithoutReplacingResult(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	defer slog.SetDefault(previous)
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone, UsedBytes: 42}, nil
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { return errors.New("delete failed") },
 	})
 	defer restore()
 	result := &model.ScanResult{}
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
 	if result.Status != model.StatusDone || result.UsedBytes != 42 || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "delete temp pod failed") || logs.Len() != 0 {
 		t.Fatalf("result/log = %#v/%q", result, logs.String())
 	}
@@ -161,16 +161,16 @@ func TestTempPodCleanupFailureIsDeferredWithoutReplacingResult(t *testing.T) {
 func TestUsageSignalsSuppressFinalOutput(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
-			restoreOptions := cmd.SetTestingOptions(120*time.Second, 1)
+			restoreOptions := cli.SetTestingOptions(120*time.Second, 1)
 			defer restoreOptions()
 			started, waiting := make(chan struct{}), make(chan struct{})
 			deleted := 0
-			restore := cmd.SetTestingHooks(cmd.TestingHooks{
+			restore := cli.SetTestingHooks(cli.TestingHooks{
 				BuildClient: func(string, string) (kubernetes.Interface, *rest.Config, error) {
 					return fake.NewSimpleClientset(), nil, nil
 				},
-				ListPVCs: func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error) {
-					return []k8s.PVCInfo{testPVC()}, nil
+				ListPVCs: func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error) {
+					return []kube.PVCInfo{testPVC()}, nil
 				},
 				CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) {
 					close(started)
@@ -187,7 +187,7 @@ func TestUsageSignalsSuppressFinalOutput(t *testing.T) {
 			done := make(chan struct{})
 			var err error
 			var stdout, stderr string
-			go func() { stdout, stderr = captureOutput(func() { err = cmd.RunUsageForTesting() }); close(done) }()
+			go func() { stdout, stderr = captureOutput(func() { err = cli.RunUsageForTesting() }); close(done) }()
 			select {
 			case <-started:
 			case <-done:
@@ -212,17 +212,17 @@ func TestUsageSignalsSuppressFinalOutput(t *testing.T) {
 func TestCompletedPVCRemainsInternalAfterInterruption(t *testing.T) {
 	started := make(chan struct{})
 	var startOnce sync.Once
-	restoreOptions := cmd.SetTestingOptions(120*time.Second, 1)
+	restoreOptions := cli.SetTestingOptions(120*time.Second, 1)
 	defer restoreOptions()
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		BuildClient: func(string, string) (kubernetes.Interface, *rest.Config, error) {
 			return fake.NewSimpleClientset(), nil, nil
 		},
-		ListPVCs: func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error) {
-			mount := []k8s.PodMount{{PodName: "existing", ContainerName: "scanner", MountPath: "/mnt"}}
-			return []k8s.PVCInfo{{Name: "done", Namespace: "ns", Mounts: mount}, {Name: "next", Namespace: "ns", Mounts: mount}}, nil
+		ListPVCs: func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error) {
+			mount := []kube.PodMount{{PodName: "existing", ContainerName: "scanner", MountPath: "/mnt"}}
+			return []kube.PVCInfo{{Name: "done", Namespace: "ns", Mounts: mount}, {Name: "next", Namespace: "ns", Mounts: mount}}, nil
 		},
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, pvc *k8s.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, pvc *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
 			if pvc.Name == "done" {
 				return &model.ScanResult{Status: model.StatusDone}, nil
 			}
@@ -235,7 +235,7 @@ func TestCompletedPVCRemainsInternalAfterInterruption(t *testing.T) {
 	done := make(chan struct{})
 	var err error
 	var stdout, stderr string
-	go func() { stdout, stderr = captureOutput(func() { err = cmd.RunUsageForTesting() }); close(done) }()
+	go func() { stdout, stderr = captureOutput(func() { err = cli.RunUsageForTesting() }); close(done) }()
 	select {
 	case <-started:
 	case <-done:
@@ -252,8 +252,8 @@ func TestCompletedPVCRemainsInternalAfterInterruption(t *testing.T) {
 
 func TestNonForceExistingPodDoesNotUseTempCleanup(t *testing.T) {
 	created, deleted := false, false
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+	restore := cli.SetTestingHooks(cli.TestingHooks{
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) {
@@ -264,46 +264,46 @@ func TestNonForceExistingPodDoesNotUseTempCleanup(t *testing.T) {
 	})
 	defer restore()
 	result := &model.ScanResult{}
-	cmd.RunPVCScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, k8s.PVCInfo{Name: "claim", Namespace: "ns", Mounts: []k8s.PodMount{{PodName: "existing", MountPath: "/mnt"}}}, false)
+	cli.RunPVCScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, kube.PVCInfo{Name: "claim", Namespace: "ns", Mounts: []kube.PodMount{{PodName: "existing", MountPath: "/mnt"}}}, false)
 	if created || deleted || result.Status != model.StatusDone {
 		t.Fatalf("created/deleted/status = %v/%v/%q", created, deleted, result.Status)
 	}
 }
 
 func TestUsageSinglePVCUsesProductionDiscoveryHook(t *testing.T) {
-	restoreOptions := cmd.SetTestingOptions(time.Second, 1)
+	restoreOptions := cli.SetTestingOptions(time.Second, 1)
 	defer restoreOptions()
 	called := false
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		BuildClient: func(string, string) (kubernetes.Interface, *rest.Config, error) {
 			return fake.NewSimpleClientset(), nil, nil
 		},
-		GetPVCByName: func(context.Context, kubernetes.Interface, string, string) (*k8s.PVCInfo, error) {
+		GetPVCByName: func(context.Context, kubernetes.Interface, string, string) (*kube.PVCInfo, error) {
 			called = true
-			return &k8s.PVCInfo{Name: "claim", Namespace: "default", Mounts: []k8s.PodMount{{PodName: "existing", MountPath: "/mnt"}}}, nil
+			return &kube.PVCInfo{Name: "claim", Namespace: "default", Mounts: []kube.PodMount{{PodName: "existing", MountPath: "/mnt"}}}, nil
 		},
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
 	})
 	defer restore()
 	var err error
 	var stdout string
-	stdout, _ = captureOutput(func() { err = cmd.RunUsageForTesting("pvc", "claim") })
+	stdout, _ = captureOutput(func() { err = cli.RunUsageForTesting("pvc", "claim") })
 	if err != nil || !called || !strings.Contains(stdout, "claim") {
 		t.Fatalf("err/called/stdout = %v/%v/%q", err, called, stdout)
 	}
 }
 
 func TestUsageAllPVCsUsesProductionListHook(t *testing.T) {
-	restoreOptions := cmd.SetTestingOptions(time.Second, 1)
+	restoreOptions := cli.SetTestingOptions(time.Second, 1)
 	defer restoreOptions()
 	called := false
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		BuildClient: func(string, string) (kubernetes.Interface, *rest.Config, error) {
 			return fake.NewSimpleClientset(), nil, nil
 		},
-		ListPVCs: func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error) {
+		ListPVCs: func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error) {
 			called = true
 			return nil, nil
 		},
@@ -311,7 +311,7 @@ func TestUsageAllPVCsUsesProductionListHook(t *testing.T) {
 	defer restore()
 
 	var err error
-	stdout, _ := captureOutput(func() { err = cmd.RunUsageForTesting() })
+	stdout, _ := captureOutput(func() { err = cli.RunUsageForTesting() })
 	if err != nil || !called || !strings.Contains(stdout, "No PVCs found.") {
 		t.Fatalf("err/called/stdout = %v/%v/%q", err, called, stdout)
 	}
@@ -319,10 +319,10 @@ func TestUsageAllPVCsUsesProductionListHook(t *testing.T) {
 
 func TestTempPodCleanupRunsBeforePanicPropagates(t *testing.T) {
 	deleted := false
-	restore := cmd.SetTestingHooks(cmd.TestingHooks{
+	restore := cli.SetTestingHooks(cli.TestingHooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
 			panic("scanner panic")
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted = true; return nil },
@@ -333,7 +333,7 @@ func TestTempPodCleanupRunsBeforePanicPropagates(t *testing.T) {
 			t.Fatal("panic cleanup contract failed")
 		}
 	}()
-	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
+	cli.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, &model.ScanResult{}, testPVC())
 }
 
 func captureOutput(run func()) (string, string) {

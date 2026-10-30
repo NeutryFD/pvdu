@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 ifeq ($(strip $(VERSION)),)
 override VERSION := dev
 endif
-LDFLAGS := -ldflags "-X github.com/neutry/pvdu/internal/cmd.version=$(VERSION)"
+LDFLAGS := -ldflags "-X github.com/neutry/pvdu/internal/cli.version=$(VERSION)"
 
 build: scanner
 	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BIN_DIR)/pvdu ./cmd/pvdu/

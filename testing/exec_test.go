@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/scanner"
 )
 
 func TestScannerExecCommand(t *testing.T) {
-	cmd, err := k8s.ScannerExecCommand("/tmp/.pvdu-scanner", "/mnt", 3, []string{"*.tmp", "lost+found"}, 4, true)
+	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 3, []string{"*.tmp", "lost+found"}, 4, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestScannerExecCommand(t *testing.T) {
 }
 
 func TestScannerExecCommandNoReportFiles(t *testing.T) {
-	cmd, err := k8s.ScannerExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, nil, 0, false)
+	cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, nil, 0, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestScannerExecCommandNoInjection(t *testing.T) {
 		`/mnt|sh -i`,
 	}
 	for _, m := range malicious {
-		cmd, err := k8s.ScannerExecCommand("/tmp/.pvdu-scanner", m, 0, nil, 0, false)
+		cmd, err := scanner.ExecCommand("/tmp/.pvdu-scanner", m, 0, nil, 0, false)
 		if err != nil {
 			t.Fatalf("mount path %q: unexpected error: %v", m, err)
 		}
@@ -85,7 +85,7 @@ func TestScannerExecCommandNoInjection(t *testing.T) {
 }
 
 func TestScannerExecCommandRejectsCommaExclude(t *testing.T) {
-	_, err := k8s.ScannerExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"/var/,cache"}, 0, false)
+	_, err := scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"/var/,cache"}, 0, false)
 	if err == nil {
 		t.Fatal("expected error for comma in exclude pattern")
 	}
@@ -93,7 +93,7 @@ func TestScannerExecCommandRejectsCommaExclude(t *testing.T) {
 		t.Errorf("error should mention comma: %v", err)
 	}
 
-	_, err = k8s.ScannerExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"ok", "bad\nexclude"}, 0, false)
+	_, err = scanner.ExecCommand("/tmp/.pvdu-scanner", "/mnt", 0, []string{"ok", "bad\nexclude"}, 0, false)
 	if err == nil {
 		t.Fatal("expected error for newline in exclude pattern")
 	}

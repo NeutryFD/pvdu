@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neutry/pvdu/internal/k8s"
 	"github.com/neutry/pvdu/internal/model"
+	"github.com/neutry/pvdu/internal/scanner"
 	"k8s.io/klog/v2"
 )
 
 func TestScannerShellSignalsUploadCompletion(t *testing.T) {
-	argv, err := k8s.ScannerExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.ExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestScannerShellSignalsUploadCompletion(t *testing.T) {
 	if !bytes.HasPrefix(output, []byte("{\"type\":\"scan-start\"}\n")) {
 		t.Fatalf("missing start event before scanner results: %s", output)
 	}
-	if size, err := k8s.ParseScannerOutput(bytes.NewReader(output), nil); err != nil || size != 42 {
+	if size, err := scanner.ParseOutput(bytes.NewReader(output), nil); err != nil || size != 42 {
 		t.Fatalf("shell output: bytes=%d err=%v", size, err)
 	}
 	// A failed upload must not announce the start of a scan.
@@ -48,12 +48,12 @@ func TestScannerStartEventPrecedesResults(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	started := make(chan struct{})
-	ctx = k8s.WithScanObserver(ctx, func(status model.ScanStatus, _ string) {
+	ctx = scanner.WithObserver(ctx, func(status model.ScanStatus, _ string) {
 		if status == model.StatusScanning {
 			close(started)
 		}
 	})
-	used, _, err := k8s.ScanStream(ctx, func(ctx context.Context, out, _ io.Writer) error {
+	used, _, err := scanner.Stream(ctx, func(ctx context.Context, out, _ io.Writer) error {
 		// Fragment the event as a network stream can; only the complete record
 		// should change state, before any directory results are available.
 		if _, err := io.WriteString(out, `{"type":"scan-`); err != nil {
@@ -89,7 +89,7 @@ func TestScannerStartEventValidation(t *testing.T) {
 		{"missing completion", "{\"type\":\"scan-start\"}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := k8s.ParseScannerOutput(strings.NewReader(tc.input), nil); err == nil {
+			if _, err := scanner.ParseOutput(strings.NewReader(tc.input), nil); err == nil {
 				t.Fatal("invalid event sequence accepted")
 			}
 		})
@@ -98,7 +98,7 @@ func TestScannerStartEventValidation(t *testing.T) {
 
 func TestScannerDiagnosticsCaptureLibraryLogs(t *testing.T) {
 	want := errors.New("closed network connection")
-	_, diagnostic, err := k8s.ScanStream(t.Context(), func(ctx context.Context, out, stderr io.Writer) error {
+	_, diagnostic, err := scanner.Stream(t.Context(), func(ctx context.Context, out, stderr io.Writer) error {
 		klog.FromContext(ctx).Error(want, "Copying stdin failed")
 		_, _ = io.WriteString(stderr, "mktemp: Read-only file system\n")
 		return want
@@ -109,7 +109,7 @@ func TestScannerDiagnosticsCaptureLibraryLogs(t *testing.T) {
 }
 
 func TestScannerDiagnosticsPreserveParseErrorAfterCancellation(t *testing.T) {
-	_, _, err := k8s.ScanStream(t.Context(), func(ctx context.Context, out, stderr io.Writer) error {
+	_, _, err := scanner.Stream(t.Context(), func(ctx context.Context, out, stderr io.Writer) error {
 		if _, err := fmt.Fprintln(out, `{invalid`); err != nil {
 			return err
 		}
@@ -123,7 +123,7 @@ func TestScannerDiagnosticsPreserveParseErrorAfterCancellation(t *testing.T) {
 
 func TestScannerDiagnosticsRetainTransportError(t *testing.T) {
 	want := errors.New("connection lost")
-	_, _, err := k8s.ScanStream(t.Context(), func(context.Context, io.Writer, io.Writer) error { return want })
+	_, _, err := scanner.Stream(t.Context(), func(context.Context, io.Writer, io.Writer) error { return want })
 	if !errors.Is(err, want) {
 		t.Fatalf("lost transport cause: %v", err)
 	}
@@ -131,11 +131,11 @@ func TestScannerDiagnosticsRetainTransportError(t *testing.T) {
 
 func TestScannerAcceptsEmptyDirectoryWithoutSize(t *testing.T) {
 	input := "{\"type\":\"dir\",\"path\":\"/empty\"}\n{\"type\":\"done\",\"size\":0}\n"
-	got, err := k8s.ParseScannerOutput(strings.NewReader(input), nil)
+	got, err := scanner.ParseOutput(strings.NewReader(input), nil)
 	if err != nil || got != 0 {
 		t.Fatalf("got %d, error %v", got, err)
 	}
-	_, err = k8s.ParseScannerOutput(strings.NewReader(`{"type":"done"}`), nil)
+	_, err = scanner.ParseOutput(strings.NewReader(`{"type":"done"}`), nil)
 	if err == nil {
 		t.Fatal("missing completion size accepted")
 	}
@@ -145,7 +145,7 @@ func TestScannerShellDecompressesUpload(t *testing.T) {
 	if _, err := exec.LookPath("gunzip"); err != nil {
 		t.Skip("gunzip required")
 	}
-	argv, err := k8s.CompressedScannerExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestScannerShellDecompressesUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shell: %v: %s", err, output)
 	}
-	if size, err := k8s.ParseScannerOutput(bytes.NewReader(output), nil); err != nil || size != 42 {
+	if size, err := scanner.ParseOutput(bytes.NewReader(output), nil); err != nil || size != 42 {
 		t.Fatalf("shell output: bytes=%d err=%v: %s", size, err, output)
 	}
 }
@@ -169,7 +169,7 @@ func TestScannerShellWithoutGunzipRequestsPlainUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	argv, err := k8s.CompressedScannerExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
