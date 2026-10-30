@@ -63,7 +63,7 @@ func RunTempPodScanForTesting(ctx context.Context, client kubernetes.Interface, 
 func RunPVCScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo, force bool) {
 	r := legacyRunner()
 	r.options.force = force
-	r.scanPVC(ctx, client, config, result, pvc)
+	r.scanPVC(ctx, client, config, 0, result, pvc)
 }
 func RunUsageForTesting(args ...string) error {
 	r := legacyRunner()

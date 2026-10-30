@@ -33,11 +33,13 @@ type Dependencies struct {
 }
 
 type runner struct {
-	options  options
-	deps     Dependencies
-	errOut   io.Writer
-	terminal bool
-	logger   *slog.Logger
+	options      options
+	deps         Dependencies
+	errOut       io.Writer
+	terminal     bool
+	liveTable    *ui.LiveTable
+	debugMu      sync.Mutex
+	debugDetails []string
 }
 
 type synchronizedWriter struct {
@@ -73,7 +75,7 @@ func newRunner(d Dependencies) *runner {
 	if d.UploadAndScan == nil {
 		d.UploadAndScan = k8s.UploadAndScanPVC
 	}
-	return &runner{options: defaultOptions(), deps: d, errOut: os.Stderr, logger: slog.Default()}
+	return &runner{options: defaultOptions(), deps: d, errOut: os.Stderr}
 }
 
 func (r *runner) run(cmd *cobra.Command) error {
@@ -86,16 +88,6 @@ func (r *runner) run(cmd *cobra.Command) error {
 		r.terminal = term.IsTerminal(int(file.Fd()))
 	}
 	r.errOut = &synchronizedWriter{w: cmd.ErrOrStderr()}
-	level := slog.LevelWarn
-	switch o.logLevel {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "error":
-		level = slog.LevelError
-	}
-	r.logger = slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: level}))
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client, config, err := r.deps.BuildClient(o.kubeconfig, o.context)
@@ -124,15 +116,45 @@ func (r *runner) run(cmd *cobra.Command) error {
 	discoveryCancel()
 	results := make([]*model.ScanResult, len(pvcs))
 	for i, pvc := range pvcs {
-		results[i] = &model.ScanResult{Namespace: pvc.Namespace, PVCName: pvc.Name, RequestedBytes: pvc.RequestedBytes, RequestedStr: pvc.RequestedStr, PVBytes: pvc.PVBytes, Status: model.StatusPending}
+		result := &model.ScanResult{Namespace: pvc.Namespace, PVCName: pvc.Name, RequestedBytes: pvc.RequestedBytes, RequestedStr: pvc.RequestedStr, PVBytes: pvc.PVBytes, Status: model.StatusPending}
+		for _, mount := range pvc.Mounts {
+			if mount.WholeVolume() {
+				result.PodName, result.ScanPath = mount.PodName, mount.MountPath
+				break
+			}
+		}
+		results[i] = result
+	}
+	if o.output == "default" || o.output == "table" {
+		if file, ok := cmd.OutOrStdout().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+			liveTable, err := ui.NewLiveTable(cmd.OutOrStdout(), o.output, results)
+			if err != nil {
+				return fmt.Errorf("start live table: %w", err)
+			}
+			r.liveTable = liveTable
+			defer func() { r.liveTable = nil }()
+		}
 	}
 	r.scanAll(ctx, client, config, results, pvcs)
+	if r.liveTable != nil {
+		if err := r.liveTable.Finish(); err != nil {
+			return fmt.Errorf("finish live table: %w", err)
+		}
+	}
 	if ctx.Err() != nil {
-		r.message("interrupted")
+		r.messageAt(slog.LevelWarn, "interrupted")
 		return ctx.Err()
 	}
-	if err := ui.WriteResults(cmd.OutOrStdout(), o.output, results); err != nil {
-		return err
+	if r.liveTable == nil {
+		if err := ui.WriteResults(cmd.OutOrStdout(), o.output, results); err != nil {
+			return err
+		}
+	}
+	if len(r.debugDetails) > 0 {
+		fmt.Fprintln(r.errOut, "\nDebug:")
+		for _, detail := range r.debugDetails {
+			fmt.Fprintln(r.errOut, "  "+detail)
+		}
 	}
 	failed := 0
 	for _, result := range results {
@@ -167,13 +189,26 @@ func (r *runner) scanAll(ctx context.Context, client kubernetes.Interface, confi
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			r.scanPVC(ctx, client, config, results[i], pvc)
+			r.scanPVC(ctx, client, config, i, results[i], pvc)
 		}()
 	}
 }
 
-func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo) {
-	result.Status = model.StatusScanning
+func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, config *rest.Config, index int, result *model.ScanResult, pvc k8s.PVCInfo) {
+	ctx = k8s.WithScanObserver(ctx, func(status model.ScanStatus, detail string) {
+		if status != "" {
+			result.Status = status
+			r.publishResult(index, result)
+		}
+		if detail != "" && r.options.logLevel == "debug" {
+			r.debugMu.Lock()
+			r.debugDetails = append(r.debugDetails, detail)
+			r.debugMu.Unlock()
+		}
+	})
+	result.Status = model.StatusPreparing
+	r.publishResult(index, result)
+	defer r.publishResult(index, result)
 	if ctx.Err() != nil {
 		r.fail(result, ctx, ctx.Err())
 		return
@@ -188,7 +223,7 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 		}
 		result.PodName, result.ScanPath = mount.PodName, mount.MountPath
 		scanCtx, cancel := context.WithTimeout(ctx, r.options.timeout)
-		r.message(fmt.Sprintf("%s/%s: scanning %s:%s", pvc.Namespace, pvc.Name, mount.PodName, mount.MountPath))
+		r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: scanning %s:%s", pvc.Namespace, pvc.Name, mount.PodName, mount.MountPath))
 		// Never upload into application storage: a failed scratch upload can use
 		// a temporary pod with --force, but cannot overwrite PVC contents.
 		sr, err := r.deps.UploadAndScan(scanCtx, client, config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
@@ -197,8 +232,14 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 			if ctx.Err() != nil {
 				r.fail(result, ctx, ctx.Err())
 			} else if r.options.force {
+				if r.options.logLevel == "debug" {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("existing pod scan failed; temporary-pod fallback: %v", err))
+				}
 				cancel()
 				r.scanWithTempPod(ctx, client, config, result, pvc)
+				if result.Status == model.StatusError {
+					result.Error = fmt.Sprintf("existing pod scan: %v; temporary pod scan: %s", err, result.Error)
+				}
 				return
 			} else {
 				r.fail(result, scanCtx, err)
@@ -211,6 +252,14 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 		return
 	}
 	r.scanWithTempPod(ctx, client, config, result, pvc)
+}
+
+func (r *runner) publishResult(index int, result *model.ScanResult) {
+	if r.liveTable == nil {
+		return
+	}
+	// Finish reports output errors after all scan workers have stopped.
+	_ = r.liveTable.Update(index, *result)
 }
 
 func scanError(result *model.ScanResult, err error) error {
@@ -233,25 +282,30 @@ func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interfac
 	}
 	opCtx, cancel := context.WithTimeout(ctx, r.options.timeout)
 	defer cancel()
+	result.PodName, result.ScanPath = "", "/mnt"
+	k8s.NotifyScanProgress(ctx, model.StatusCreatingPod, "")
+	r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: creating temporary pod", pvc.Namespace, pvc.Name))
 	pod, err := r.deps.CreatePod(opCtx, client, pvc, r.options.image)
 	if err != nil {
 		r.fail(result, opCtx, err)
 		return
 	}
 	result.PodName, result.ScanPath = pod.Name, "/mnt"
+	k8s.NotifyScanProgress(ctx, model.StatusWaitingPod, "")
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), r.options.cleanupTimeout)
 		defer cleanupCancel()
 		if err := r.deps.DeletePod(cleanupCtx, client, pvc.Namespace, pod); err != nil {
 			warning := fmt.Sprintf("delete temp pod failed: %s/%s: %v", pvc.Namespace, pod.Name, err)
 			result.Warnings = append(result.Warnings, warning)
-			r.logger.Error(warning)
 		}
 	}()
 	if err := r.deps.WaitForPodReady(opCtx, client, pvc.Namespace, pod.Name, r.options.timeout); err != nil {
 		r.fail(result, opCtx, err)
 		return
 	}
+	k8s.NotifyScanProgress(ctx, model.StatusPodReady, "")
+	r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: uploading scanner and scanning temporary pod %s:/mnt", pvc.Namespace, pvc.Name, pod.Name))
 	sr, err := r.deps.UploadAndScan(opCtx, client, config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
 	if ctx.Err() != nil {
 		r.fail(result, ctx, ctx.Err())
@@ -272,10 +326,28 @@ func (r *runner) fail(result *model.ScanResult, ctx context.Context, err error) 
 		message = fmt.Sprintf("timed out after %s (try --timeout/-t)", r.options.timeout)
 	}
 	result.Status, result.Error = model.StatusError, message
-	r.message(fmt.Sprintf("%s/%s: error: %s", result.Namespace, result.PVCName, message))
 }
 
 func (r *runner) message(message string) {
+	r.messageAt(slog.LevelInfo, message)
+}
+
+func (r *runner) messageAt(level slog.Level, message string) {
+	if r.liveTable != nil {
+		return
+	}
+	minimum := slog.LevelWarn
+	switch r.options.logLevel {
+	case "debug":
+		minimum = slog.LevelDebug
+	case "info":
+		minimum = slog.LevelInfo
+	case "error":
+		minimum = slog.LevelError
+	}
+	if level < minimum {
+		return
+	}
 	if r.terminal {
 		message = "\r\033[2K" + message
 	}
