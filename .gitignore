@@ -1,4 +1,5 @@
 /build/
+/bin/
 /pvdu-scanner
 /cmd/pvdu/pvdu-scanner
 /cmd/pvdu/dirwalker
