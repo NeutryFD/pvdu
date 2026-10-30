@@ -37,7 +37,7 @@ make build
 | `--context` | | | Kubernetes context |
 | `--kubeconfig` | | | Path to kubeconfig file |
 | `--output` | `-o` | `default` | Output format: `default`, `table`, `json`, `yaml` |
-| `--log-level` | | | Log level: `debug`, `info`, `warn`, `error` |
+| `--log-level` | | `warn` | Progress detail: `debug`, `info`, `warn`, `error` |
 | `--version` | | | Print version and exit |
 
 ## Output formats
@@ -49,13 +49,19 @@ make build
 ./build/pvdu -n default -o yaml      # YAML output
 ```
 
-The `default` format shows each PVC on one line with columns: NAMESPACE, POD, PVC, PATH, REQUESTED, PV SIZE, USED, %. Progress goes to stderr; redirected output contains no terminal escape sequences. JSON and YAML use matching field names and return an empty array when there are no PVCs. Failed scans appear in the results and cause a nonzero exit status. Cleanup warnings are included in `warnings` without replacing scan results.
+The `default` and `table` formats show each PVC on one line with columns: NAMESPACE, POD, PVC, PATH, REQUESTED, PV SIZE, USED, %, STATUS. In an interactive terminal the table updates in place below the command, without switching to the alternate screen; redirected output prints one final table with no terminal escape sequences. JSON and YAML use matching field names and return an empty array when there are no PVCs. Failed scans appear in the results and cause a nonzero exit status. Cleanup warnings are included in `warnings` without replacing scan results.
+
+STATUS moves through `WAITING`, `PREPARING`, `UPLOADING` and `SCANNING` to `DONE` or `ERROR`. Temporary-pod scans (`--force`) also show `CREATING POD`, `WAITING POD` and `POD READY`, and the temporary pod name appears as soon as it exists. `UPLOADING` covers sending the scanner into the pod, not PVC data; `SCANNING` begins when the pod reports that the scanner has started.
+
+Errors and warnings are never printed between progress updates. They are collected and shown on one line each in a `Diagnostics:` section after the table. `--log-level` controls extra detail: the default `warn` is quiet, `info` adds scan and temporary-pod progress for non-interactive output, and `debug` adds a `Debug:` section after the results with the remote exec target and command, plus the reason an existing-pod scan fell back to a temporary pod.
 
 ## Measurement and permissions
 
 USED is the sum of apparent file sizes found by the scanner, not allocated disk blocks or filesystem free space. Excludes and depth limits can reduce the total. Deleted-but-open files, snapshots, sparse-file allocation, and filesystem overhead are not measured. The percentage compares this total with requested capacity.
 
 Only whole-volume filesystem mounts are scanned; subpath-only mounts use a temporary pod. Block-mode PVCs are unsupported. ReadWriteOnce fallback stays on the attached node; an in-use ReadWriteOncePod claim cannot be mounted by a second pod. Existing containers must have writable `/tmp` and shell utilities; pvdu never uploads a scanner into application storage. The ineffective `--files` option has been removed.
+
+The scanner binary is built without debug symbols and sent gzip-compressed (about 1.1 MB). Pods without `gunzip` are detected before any data is read and pvdu retries with the uncompressed binary. Upload time depends on the cluster's exec stream throughput, which concurrent scans share, so a higher `--concurrency` can lengthen `UPLOADING` without shortening the run.
 
 Required Kubernetes permissions are `get/list` for PVCs and pods, `get` for PVs and nodes (architecture detection), and `create` for `pods/exec`. Temporary scans additionally need pod `create/delete`. API discovery failures are reported rather than treated as empty results. `--all-namespaces` cannot be combined with `--pvc`, positional PVC selection, or `--namespace`.
 
