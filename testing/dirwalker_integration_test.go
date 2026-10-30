@@ -28,7 +28,7 @@ func buildDirwalker(t *testing.T) string {
 	repoRoot := findRepoRoot(t)
 	bin := filepath.Join(t.TempDir(), "dirwalker")
 
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/NeutryFD/dirwalker/cmd/dirwalker")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "github.com/NeutryFD/dirwalker/cmd/dirwalker")
 	cmd.Dir = repoRoot
 	cmd.Stderr = os.Stderr
 	if out, err := cmd.Output(); err != nil {

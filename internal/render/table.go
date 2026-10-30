@@ -29,12 +29,13 @@ func renderTable(results []*model.ScanResult, borders, diagnosticsEnabled bool) 
 		if r.PVBytes > 0 {
 			row[5] = dirwalker.FormatBytesShort(r.PVBytes)
 		}
-		if r.Status == model.StatusDone {
+		switch r.Status {
+		case model.StatusDone:
 			row[6] = dirwalker.FormatBytesShort(r.UsedBytes)
 			if r.RequestedBytes > 0 {
 				row[7] = fmt.Sprintf("%.0f%%", 100*float64(r.UsedBytes)/float64(r.RequestedBytes))
 			}
-		} else if r.Status == model.StatusError {
+		case model.StatusError:
 			if r.Error != "" {
 				diagnostics = append(diagnostics, fmt.Sprintf("%s/%s: %s", r.Namespace, r.PVCName, singleLine(r.Error)))
 			}

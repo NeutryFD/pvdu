@@ -31,10 +31,6 @@ func (r *runner) fail(result *model.ScanResult, ctx context.Context, err error) 
 	result.Status, result.Error = model.StatusError, message
 }
 
-func (r *runner) message(message string) {
-	r.messageAt(slog.LevelInfo, message)
-}
-
 func (r *runner) messageAt(level slog.Level, message string) {
 	if r.liveTable != nil {
 		return
