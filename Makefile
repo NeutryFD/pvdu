@@ -6,6 +6,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 ifeq ($(strip $(VERSION)),)
 override VERSION := dev
 endif
+# Tests in the CLI end-to-end suite that need a reachable cluster.
+CLUSTER_TESTS := ^Test(NoArgs|ForceFlag|JSONOutput|YAMLOutput|DefaultOutputHasHeader|ConcurrencyFlag|MaxDepthFlag|TimeoutFlag|AllNamespacesShortFlag|WorkersFlag|ExcludeFlag|MultipleExcludeFlags|ContextFlag)$$
 LDFLAGS := -ldflags "-X github.com/neutry/pvdu/internal/cli.version=$(VERSION)"
 
 help: ## Show available targets
@@ -36,12 +38,11 @@ tidy: ## Tidy go.mod and go.sum
 
 test: test-unit test-integration ## Run all tests
 
-test-unit: ## Run tests that need no cluster
-	go test ./internal/...
-	go test ./testing/ -run 'Pod|ScannerExecCommand'
+test-unit: scanner ## Run tests that need no cluster, with the race detector
+	go test -race -count=1 ./internal/... ./testing/... -skip '$(CLUSTER_TESTS)'
 
-test-integration: scanner ## Run the full test suite
-	go test ./testing/...
+test-integration: scanner ## Run the full suite; needs a reachable cluster
+	go test -count=1 ./testing/...
 
 clean: ## Remove build artifacts
 	rm -rf $(BIN_DIR) cmd/pvdu/dirwalker cmd/pvdu/scanners
