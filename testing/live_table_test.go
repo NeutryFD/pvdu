@@ -104,7 +104,7 @@ func TestLiveTableUpdatesStatusAndDefersDiagnostics(t *testing.T) {
 }
 
 func TestTableDiagnosticsAreSingleLine(t *testing.T) {
-	got := render.RenderDefault([]*model.ScanResult{{
+	got := render.Default([]*model.ScanResult{{
 		Namespace: "monitoring", PVCName: "claim", Status: model.StatusError,
 		Error:    "upload scanner: exit 125 (mktemp: Read-only file system\n)",
 		Warnings: []string{"cleanup failed\n retry later"},
