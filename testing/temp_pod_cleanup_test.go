@@ -137,7 +137,7 @@ func TestTempPodCleanupCancellationUsesBackgroundContext(t *testing.T) {
 	}
 }
 
-func TestTempPodCleanupFailureIsLoggedWithoutReplacingResult(t *testing.T) {
+func TestTempPodCleanupFailureIsDeferredWithoutReplacingResult(t *testing.T) {
 	var logs strings.Builder
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
@@ -153,7 +153,7 @@ func TestTempPodCleanupFailureIsLoggedWithoutReplacingResult(t *testing.T) {
 	defer restore()
 	result := &model.ScanResult{}
 	cmd.RunTempPodScanForTesting(context.Background(), fake.NewSimpleClientset(), nil, result, testPVC())
-	if result.Status != model.StatusDone || result.UsedBytes != 42 || !strings.Contains(logs.String(), "delete temp pod failed") {
+	if result.Status != model.StatusDone || result.UsedBytes != 42 || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "delete temp pod failed") || logs.Len() != 0 {
 		t.Fatalf("result/log = %#v/%q", result, logs.String())
 	}
 }
