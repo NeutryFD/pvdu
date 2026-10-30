@@ -14,11 +14,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Stages run in order: lint -> build -> unit tests -> e2e (KinD). Each stage only
+# starts when the previous one passed. Set the repository variable CI_RUNNER
+# (for example "self-hosted") to move every job off GitHub-hosted runners.
 jobs:
-  # Decides whether the slow KinD job is needed. Lint and unit tests always run.
+  # Decides whether the slow e2e stage is needed. It never blocks the stages.
   changes:
     name: detect changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -50,8 +53,8 @@ jobs:
           fi
 
   lint:
-    name: lint
-    runs-on: ubuntu-latest
+    name: 1 - lint
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -69,10 +72,11 @@ jobs:
         with:
           version: v2.15.0
 
-  unit:
-    name: unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  build:
+    name: 2 - build
+    needs: lint
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -87,14 +91,27 @@ jobs:
       - name: Vet
         run: make vet
 
+  unit:
+    name: 3 - unit tests
+    needs: build
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Unit tests
         run: make test-unit
 
-  integration:
-    name: integration tests (KinD)
-    needs: changes
+  e2e:
+    name: 4 - e2e tests (KinD)
+    needs: [unit, changes]
     if: ${{ needs.changes.outputs.cluster == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -110,20 +127,28 @@ jobs:
           chmod +x kind
           ./kind create cluster --wait 120s
 
-      - name: Integration tests
+      - name: E2E tests
         run: make test-integration
 
-  # Single required check for branch protection. A job skipped on purpose (the
-  # KinD job for docs-only changes) is fine; a failed or cancelled one is not.
+  # Single required check for branch protection. An e2e stage skipped on purpose
+  # (docs-only changes) is fine; a failed or cancelled stage is not, and a failure
+  # in an earlier stage skips the later ones, so it is caught here too.
   ci-success:
     name: ci-success
     if: ${{ always() }}
-    needs: [changes, lint, unit, integration]
-    runs-on: ubuntu-latest
+    needs: [changes, lint, build, unit, e2e]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
-      - name: Require all jobs to succeed
+      - name: Require every stage to succeed
         run: |
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
-            echo "One or more required jobs did not succeed."
+            echo "A stage failed or was cancelled."
             exit 1
           fi
+          # Build and unit must have really run: a skipped one means an earlier stage failed.
+          for stage in "${{ needs.lint.result }}" "${{ needs.build.result }}" "${{ needs.unit.result }}"; do
+            if [ "$stage" != "success" ]; then
+              echo "A required stage did not run to success: $stage"
+              exit 1
+            fi
+          done
