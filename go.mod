@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/NeutryFD/dirwalker v0.3.0
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
