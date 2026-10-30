@@ -257,3 +257,18 @@ func TestUsageAllPVCsUsesProductionListHook(t *testing.T) {
 		t.Fatalf("err/called/stdout = %v/%v/%q", run.err, called, run.stdout)
 	}
 }
+
+func TestPanickingScanIsReportedAfterCleanup(t *testing.T) {
+	deleted := 0
+	result, run := scanPVC(t, context.Background(), hooks{
+		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
+		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+			panic("scanner panic")
+		},
+		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted++; return nil },
+	}, testPVC())
+	if deleted != 1 || result.Status != model.StatusError || !strings.Contains(result.Error, "scanner panic") || run.err == nil {
+		t.Fatalf("deletes/result/err = %d/%#v/%v", deleted, result, run.err)
+	}
+}

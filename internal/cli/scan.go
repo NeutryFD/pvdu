@@ -35,6 +35,14 @@ func (r *runner) scanAll(ctx context.Context, client kubernetes.Interface, confi
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// A panic in one scan must not kill the others or leave the table
+			// unfinished. Deferred pod cleanup has already run while unwinding.
+			defer func() {
+				if p := recover(); p != nil {
+					results[i].Status, results[i].Error = model.StatusError, fmt.Sprintf("scan panicked: %v", p)
+					r.publishResult(i, results[i])
+				}
+			}()
 			r.scanPVC(ctx, client, config, i, results[i], pvc)
 		}()
 	}
