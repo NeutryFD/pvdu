@@ -172,14 +172,3 @@ func DeleteScanPod(ctx context.Context, client kubernetes.Interface, namespace s
 	}
 	return nil
 }
-
-// CreateTempPod is retained for callers migrating to the UID-aware API.
-func CreateTempPod(ctx context.Context, client kubernetes.Interface, namespace, pvc, image string) (string, error) {
-	pod, err := CreateScanPod(ctx, client, PVCInfo{Name: pvc, Namespace: namespace}, image)
-	return pod.Name, err
-}
-
-// DeletePod reclaims only terminal managed pods. Active scan cleanup uses DeleteScanPod.
-func DeletePod(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
-	return RemoveStalePod(ctx, client, namespace, name, 30*time.Second)
-}
