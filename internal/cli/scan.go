@@ -80,7 +80,7 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 		r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: scanning %s:%s", pvc.Namespace, pvc.Name, mount.PodName, mount.MountPath))
 		// Never upload into application storage: a failed scratch upload can use
 		// a temporary pod with --force, but cannot overwrite PVC contents.
-		sr, err := r.deps.UploadAndScan(scanCtx, client, config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
+		sr, err := r.deps.UploadAndScan(scanCtx, client, config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, r.options.maxDepth, r.options.excludes, r.options.workers)
 		err = scanError(sr, err)
 		if err != nil {
 			switch {

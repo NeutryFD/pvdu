@@ -43,7 +43,7 @@ func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interfac
 	}
 	scanner.NotifyProgress(ctx, model.StatusPodReady, "")
 	r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: uploading scanner and scanning temporary pod %s:/mnt", pvc.Namespace, pvc.Name, pod.Name))
-	sr, err := r.deps.UploadAndScan(opCtx, client, config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
+	sr, err := r.deps.UploadAndScan(opCtx, client, config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, r.options.maxDepth, r.options.excludes, r.options.workers)
 	if ctx.Err() != nil {
 		r.fail(result, ctx, ctx.Err())
 		return

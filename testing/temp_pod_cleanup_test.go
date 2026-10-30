@@ -29,7 +29,7 @@ func TestTempPodCleanupSuccess(t *testing.T) {
 			events = append(events, "ready")
 			return nil
 		},
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			events = append(events, "scan")
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
@@ -75,7 +75,7 @@ func TestTempPodCleanupScanFailure(t *testing.T) {
 	result, _ := scanPVC(t, context.Background(), hooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			return nil, errors.New("scan failed")
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted++; return nil },
@@ -124,7 +124,7 @@ func TestTempPodCleanupFailureIsDeferredWithoutReplacingResult(t *testing.T) {
 	result, run := scanPVC(t, context.Background(), hooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone, UsedBytes: 42}, nil
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { return errors.New("delete failed") },
@@ -186,7 +186,7 @@ func TestCompletedPVCRemainsInternalAfterInterruption(t *testing.T) {
 			mount := []kube.PodMount{{PodName: "existing", ContainerName: "scanner", MountPath: "/mnt"}}
 			return []kube.PVCInfo{{Name: "done", Namespace: "ns", Mounts: mount}, {Name: "next", Namespace: "ns", Mounts: mount}}, nil
 		},
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, pvc *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, pvc *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			if pvc.Name == "done" {
 				return &model.ScanResult{Status: model.StatusDone}, nil
 			}
@@ -215,7 +215,7 @@ func TestCompletedPVCRemainsInternalAfterInterruption(t *testing.T) {
 func TestNonForceExistingPodDoesNotUseTempCleanup(t *testing.T) {
 	created, deleted := false, false
 	result, _ := scanPVC(t, context.Background(), hooks{
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
 		CreateTempPod: func(context.Context, kubernetes.Interface, string, string, string) (string, error) {
@@ -236,7 +236,7 @@ func TestUsageSinglePVCUsesProductionDiscoveryHook(t *testing.T) {
 			called = true
 			return &kube.PVCInfo{Name: "claim", Namespace: "default", Mounts: []kube.PodMount{{PodName: "existing", MountPath: "/mnt"}}}, nil
 		},
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			return &model.ScanResult{Status: model.StatusDone}, nil
 		},
 	}, "pvc", "claim")
@@ -263,7 +263,7 @@ func TestPanickingScanIsReportedAfterCleanup(t *testing.T) {
 	result, run := scanPVC(t, context.Background(), hooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+		UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 			panic("scanner panic")
 		},
 		DeletePod: func(context.Context, kubernetes.Interface, string, string) error { deleted++; return nil },

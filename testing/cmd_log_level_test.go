@@ -32,7 +32,7 @@ func runForceProgressCommand(t *testing.T, output io.Writer) {
 		},
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
 		DeletePod:       func(context.Context, kubernetes.Interface, string, kube.PodRef) error { return nil },
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			if pod == "app" {
 				return nil, errors.New("read-only filesystem")
 			}
@@ -76,7 +76,7 @@ func TestLogLevelControlsProgressOutput(t *testing.T) {
 						Mounts: []kube.PodMount{{PodName: "app", ContainerName: "app", MountPath: "/data"}},
 					}}, nil
 				},
-				UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+				UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 					return &model.ScanResult{Status: model.StatusDone}, nil
 				},
 			}

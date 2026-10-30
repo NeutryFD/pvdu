@@ -36,7 +36,7 @@ func TestScanTimeoutTotalBudgetSpansTemporaryPodLifecycle(t *testing.T) {
 			time.Sleep(16 * time.Millisecond)
 			return nil
 		},
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			deadlines[2], _ = ctx.Deadline()
 			return nil, ctx.Err()
 		},
@@ -87,7 +87,7 @@ func TestScanTimeoutDuringScannerCancelsAndDeletesPod(t *testing.T) {
 	result := timeoutScan(t, 5*time.Millisecond, hooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			<-ctx.Done()
 			cancelled.Store(true)
 			return nil, ctx.Err()
@@ -122,7 +122,7 @@ func TestExistingMountScanHasIndependentTimeout(t *testing.T) {
 	var cancelled atomic.Bool
 	var tempCreated atomic.Bool
 	result, _ := scanPVC(t, context.Background(), hooks{
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			if pod != "existing" {
 				tempCreated.Store(true)
 			}
@@ -145,7 +145,7 @@ func TestExistingMountTimeoutFallsBackUsingActiveParent(t *testing.T) {
 	var fallbackContextActive atomic.Bool
 	var temporaryLifecycle atomic.Int32
 	result, _ := scanPVC(t, context.Background(), hooks{
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, pod, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			if pod == "existing" {
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -171,7 +171,7 @@ func TestParentCancellationPreventsForcedFallback(t *testing.T) {
 	defer cancel()
 	var tempCreated atomic.Bool
 	_, run := scanPVC(t, ctx, hooks{
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			cancel()
 			return nil, ctx.Err()
 		},
@@ -192,7 +192,7 @@ func TestParentCancellationIsInterruptedNotTimeoutAndCleansPod(t *testing.T) {
 	_, run := scanPVC(t, ctx, hooks{
 		CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 		WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int, _ bool) (*model.ScanResult, error) {
+		UploadAndScan: func(ctx context.Context, _ kubernetes.Interface, _ *rest.Config, _, _, _, _, _ string, _ *kube.PVCInfo, _ int, _ []string, _ int) (*model.ScanResult, error) {
 			cancel()
 			<-ctx.Done()
 			return nil, ctx.Err()
@@ -220,7 +220,7 @@ func TestNonTimeoutErrorsPreserveOriginalMessages(t *testing.T) {
 		result := timeoutScan(t, time.Second, hooks{
 			CreateTempPod:   func(context.Context, kubernetes.Interface, string, string, string) (string, error) { return "pod", nil },
 			WaitForPodReady: func(context.Context, kubernetes.Interface, string, string, time.Duration) error { return nil },
-			UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error) {
+			UploadAndScan: func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error) {
 				return nil, errors.New("scanner exploded")
 			},
 		})

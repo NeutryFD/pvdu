@@ -29,7 +29,7 @@ type Dependencies struct {
 	CreatePod       func(context.Context, kubernetes.Interface, kube.PVCInfo, string) (kube.PodRef, error)
 	WaitForPodReady func(context.Context, kubernetes.Interface, string, string, time.Duration) error
 	DeletePod       func(context.Context, kubernetes.Interface, string, kube.PodRef) error
-	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
+	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int) (*model.ScanResult, error)
 }
 
 type runner struct {
@@ -70,7 +70,7 @@ func newRunner(d Dependencies) *runner {
 func (r *runner) run(cmd *cobra.Command) error {
 	o := r.options
 	// Validate scanner arguments before even building a Kubernetes client.
-	if _, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers, false); err != nil {
+	if _, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers); err != nil {
 		return err
 	}
 	if file, ok := cmd.ErrOrStderr().(*os.File); ok {

@@ -19,7 +19,7 @@ import (
 )
 
 func TestScannerShellSignalsUploadCompletion(t *testing.T) {
-	argv, err := scanner.ExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.ExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestScannerShellDecompressesUpload(t *testing.T) {
 	if _, err := exec.LookPath("gunzip"); err != nil {
 		t.Skip("gunzip required")
 	}
-	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestScannerShellWithoutGunzipRequestsPlainUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1, false)
+	argv, err := scanner.CompressedExecCommand(filepath.Join(t.TempDir(), "scanner"), "/data", 0, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
