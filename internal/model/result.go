@@ -13,11 +13,3 @@ type ScanResult struct {
 	Error          string     `json:"error,omitempty" yaml:"error,omitempty"`
 	Warnings       []string   `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
-
-type OutputFormat string
-
-const (
-	FormatTable OutputFormat = "table"
-	FormatJSON  OutputFormat = "json"
-	FormatYAML  OutputFormat = "yaml"
-)
