@@ -8,7 +8,6 @@ const (
 	StatusScanning    ScanStatus = "scanning"
 	StatusDone        ScanStatus = "done"
 	StatusError       ScanStatus = "error"
-	StatusSkipped     ScanStatus = "skipped"
 	StatusCreatingPod ScanStatus = "creating pod"
 	StatusWaitingPod  ScanStatus = "waiting pod"
 	StatusPodReady    ScanStatus = "pod ready"
