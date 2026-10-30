@@ -22,13 +22,27 @@ func isAlphanumeric(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
-func staleTempPod(name string) *corev1.Pod {
+// staleTempPod is a finished pvdu-managed pod, the only kind RemoveStalePod reclaims.
+func staleTempPod() *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      "pvdu-scanner-data",
 			Namespace: testNamespace,
+			UID:       "stale-uid",
+			Labels:    map[string]string{"pvdu.neutry.io/managed": "true"},
 		},
+		Status: corev1.PodStatus{Phase: corev1.PodFailed},
 	}
+}
+
+func createdPods(cs *fake.Clientset) []*corev1.Pod {
+	var pods []*corev1.Pod
+	for _, a := range cs.Actions() {
+		if a.GetVerb() == "create" && a.GetResource().Resource == "pods" {
+			pods = append(pods, a.(k8stesting.CreateAction).GetObject().(*corev1.Pod))
+		}
+	}
+	return pods
 }
 
 func TestBuildTempPodNameShortPVC(t *testing.T) {
@@ -45,94 +59,66 @@ func TestBuildTempPodNameShortPVC(t *testing.T) {
 	}
 }
 
-func TestCreateTempPodTruncatedName(t *testing.T) {
-	pvc := strings.Repeat("a", 80)
-	want := "pvdu-scanner-" + strings.Repeat("a", 49)
+func TestCreateScanPodTruncatesGenerateName(t *testing.T) {
 	cs := fake.NewSimpleClientset()
+	pvc := kube.PVCInfo{Name: strings.Repeat("a", 80), Namespace: testNamespace}
 
-	got, err := kube.CreateTempPod(context.Background(), cs, testNamespace, pvc, "scan-image:v1")
-	if err != nil {
-		t.Fatalf("CreateTempPod returned error: %v", err)
+	if _, err := kube.CreateScanPod(context.Background(), cs, pvc, "scan-image:v1"); err != nil {
+		t.Fatalf("CreateScanPod returned error: %v", err)
 	}
-	if got != want {
-		t.Fatalf("CreateTempPod returned name %q, want %q", got, want)
+	pods := createdPods(cs)
+	if len(pods) != 1 {
+		t.Fatalf("created %d pods, want 1", len(pods))
 	}
-
-	if _, getErr := cs.CoreV1().Pods(testNamespace).Get(context.Background(), want, metav1.GetOptions{}); getErr != nil {
-		t.Fatalf("pod %q was not created: %v", want, getErr)
+	prefix := pods[0].GenerateName
+	if !strings.HasPrefix(prefix, "pvdu-scanner-") || !strings.HasSuffix(prefix, "-") {
+		t.Fatalf("GenerateName %q must be a pvdu-scanner- prefix ending in a dash", prefix)
+	}
+	// The API server appends a 5 character suffix, so the whole name must stay within 63.
+	if len(prefix)+5 > 63 {
+		t.Fatalf("GenerateName %q leaves no room for the generated suffix", prefix)
+	}
+	if pods[0].Labels["pvdu.neutry.io/managed"] != "true" {
+		t.Fatalf("pod must be labelled as pvdu-managed, got %v", pods[0].Labels)
 	}
 }
 
-func TestCreateTempPodNoCreateOnStaleDeleteFail(t *testing.T) {
-	cs := fake.NewSimpleClientset(staleTempPod("pvdu-scanner-data"))
+func TestCreateScanPodNeverDeletesExistingPod(t *testing.T) {
+	cs := fake.NewSimpleClientset(staleTempPod())
 
-	deniedErr := errors.New("delete denied")
-	cs.PrependReactor("delete", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, deniedErr
-	})
-
-	_, err := kube.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
-	if err == nil {
-		t.Fatalf("expected a non-nil error, got nil")
-	}
-	if !errors.Is(err, deniedErr) {
-		t.Fatalf("error %v must wrap the stale-delete failure %q", err, "delete denied")
+	if _, err := kube.CreateScanPod(context.Background(), cs, kube.PVCInfo{Name: "data", Namespace: testNamespace}, "scan-image:v1"); err != nil {
+		t.Fatalf("CreateScanPod returned error: %v", err)
 	}
 	for _, a := range cs.Actions() {
-		if a.GetVerb() == "create" && a.GetResource().Resource == "pods" {
-			t.Fatalf("unexpected Create request for a pod after stale-delete failure")
+		if a.GetVerb() == "delete" && a.GetResource().Resource == "pods" {
+			t.Fatal("CreateScanPod must never delete an existing pod")
 		}
+	}
+	if len(createdPods(cs)) != 1 {
+		t.Fatalf("expected exactly one pod to be created")
 	}
 }
 
-func TestCreateTempPodDeleteOrderedBeforeCreate(t *testing.T) {
-	cs := fake.NewSimpleClientset(staleTempPod("pvdu-scanner-data"))
-
-	got, err := kube.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
-	if err != nil {
-		t.Fatalf("CreateTempPod returned error: %v", err)
+func TestCreateScanPodMountsClaimReadOnly(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	if _, err := kube.CreateScanPod(context.Background(), cs, kube.PVCInfo{Name: "data", Namespace: testNamespace}, "scan-image:v1"); err != nil {
+		t.Fatalf("CreateScanPod returned error: %v", err)
 	}
-	if got != "pvdu-scanner-data" {
-		t.Fatalf("CreateTempPod returned name %q, want %q", got, "pvdu-scanner-data")
+	pods := createdPods(cs)
+	if len(pods) != 1 {
+		t.Fatalf("created %d pods, want 1", len(pods))
 	}
-
-	created, getErr := cs.CoreV1().Pods(testNamespace).Get(context.Background(), "pvdu-scanner-data", metav1.GetOptions{})
-	if getErr != nil {
-		t.Fatalf("pod %q was not created: %v", "pvdu-scanner-data", getErr)
+	spec := pods[0].Spec
+	if len(spec.Volumes) != 1 || spec.Volumes[0].PersistentVolumeClaim == nil || !spec.Volumes[0].PersistentVolumeClaim.ReadOnly {
+		t.Fatalf("claim volume must be read-only: %#v", spec.Volumes)
 	}
-	if created.Name != "pvdu-scanner-data" || created.Namespace != testNamespace {
-		t.Fatalf("unexpected created pod %s/%s", created.Namespace, created.Name)
-	}
-
-	deleteIdx, createIdx := -1, -1
-	for i, a := range cs.Actions() {
-		if a.GetResource().Resource != "pods" {
-			continue
-		}
-		switch a.GetVerb() {
-		case "delete":
-			if deleteIdx == -1 {
-				deleteIdx = i
-			}
-		case "create":
-			if createIdx == -1 {
-				createIdx = i
-			}
-		}
-	}
-	if deleteIdx == -1 {
-		t.Fatalf("expected a Delete request for pod %q", "pvdu-scanner-data")
-	}
-	if createIdx == -1 {
-		t.Fatalf("expected a Create request for pod %q", "pvdu-scanner-data")
-	}
-	if deleteIdx > createIdx {
-		t.Fatalf("Delete (action %d) must be recorded before Create (action %d)", deleteIdx, createIdx)
+	if mounts := spec.Containers[0].VolumeMounts; len(mounts) != 1 || !mounts[0].ReadOnly || mounts[0].MountPath != "/mnt" {
+		t.Fatalf("container mount must be read-only at /mnt: %#v", mounts)
 	}
 }
 
 func TestRemoveStalePodDeadlineExpiry(t *testing.T) {
-	pod := staleTempPod("pvdu-scanner-data")
+	pod := staleTempPod()
 	cs := fake.NewSimpleClientset(pod)
 
 	cs.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -159,7 +145,7 @@ func TestRemoveStalePodDeadlineExpiry(t *testing.T) {
 }
 
 func TestRemoveStalePodWrappedError(t *testing.T) {
-	pod := staleTempPod("pvdu-scanner-data")
+	pod := staleTempPod()
 	cs := fake.NewSimpleClientset(pod)
 
 	stuckErr := errors.New("the pod is stuck")
@@ -180,7 +166,7 @@ func TestRemoveStalePodWrappedError(t *testing.T) {
 }
 
 func TestRemoveStalePodPollWrappedError(t *testing.T) {
-	pod := staleTempPod("pvdu-scanner-data")
+	pod := staleTempPod()
 	cs := fake.NewSimpleClientset(pod)
 	stuckErr := errors.New("the pod status is unavailable")
 	gets := 0
@@ -202,7 +188,7 @@ func TestRemoveStalePodPollWrappedError(t *testing.T) {
 }
 
 func TestRemoveStalePodDeletesAndWaitsGone(t *testing.T) {
-	pod := staleTempPod("pvdu-scanner-data")
+	pod := staleTempPod()
 	cs := fake.NewSimpleClientset(pod)
 
 	gets := 0
