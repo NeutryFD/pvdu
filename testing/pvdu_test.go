@@ -16,7 +16,7 @@ func buildBinary(t *testing.T) string {
 	repoRoot := findRepoRoot(t)
 	binPath := filepath.Join(t.TempDir(), "pvdu")
 
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/pvdu/")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", binPath, "./cmd/pvdu/")
 	cmd.Dir = repoRoot
 	cmd.Stderr = os.Stderr
 	if out, err := cmd.Output(); err != nil {
@@ -45,7 +45,7 @@ func findRepoRoot(t *testing.T) string {
 
 func runPvdu(t *testing.T, bin string, args ...string) (string, string, error) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(t.Context(), bin, args...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -64,10 +64,11 @@ func TestHelpFlag(t *testing.T) {
 	if !strings.Contains(stdout, "pvdu") {
 		t.Errorf("--help output should contain 'pvdu'")
 	}
-	if !strings.Contains(stdout, "usage") {
+	lower := strings.ToLower(stdout)
+	if !strings.Contains(lower, "usage") {
 		t.Errorf("--help output should contain 'usage'")
 	}
-	if !strings.Contains(stdout, "flags") {
+	if !strings.Contains(lower, "flags") {
 		t.Errorf("--help output should contain 'flags'")
 	}
 }
@@ -131,8 +132,11 @@ func TestInvalidOutputFormat(t *testing.T) {
 	bin := buildBinary(t)
 
 	_, stderr, err := runPvdu(t, bin, "-o", "invalid")
-	if err != nil {
-		t.Fatalf("pvdu with invalid format should not error, got: %v\nstderr: %s", err, stderr)
+	if err == nil {
+		t.Fatal("pvdu with an invalid output format should fail")
+	}
+	if !strings.Contains(stderr, "invalid output format") {
+		t.Errorf("stderr should explain the invalid format, got: %s", stderr)
 	}
 }
 
