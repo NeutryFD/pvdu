@@ -32,15 +32,15 @@ func WriteResults(w io.Writer, format string, results []*model.ScanResult) error
 	}
 }
 
-func RenderJSON(results []*model.ScanResult) string {
+func JSON(results []*model.ScanResult) string {
 	var b strings.Builder
 	_ = WriteResults(&b, "json", results)
 	return strings.TrimSuffix(b.String(), "\n")
 }
-func RenderYAML(results []*model.ScanResult) string {
+func YAML(results []*model.ScanResult) string {
 	var b strings.Builder
 	_ = WriteResults(&b, "yaml", results)
 	return b.String()
 }
-func RenderDefault(results []*model.ScanResult) string { return render(results, false) }
-func RenderTable(results []*model.ScanResult) string   { return render(results, true) }
+func Default(results []*model.ScanResult) string { return render(results, false) }
+func Table(results []*model.ScanResult) string   { return render(results, true) }
