@@ -18,7 +18,7 @@ type options struct {
 }
 
 func defaultOptions() options {
-	return options{namespace: "default", output: "default", image: "alpine:3.23", timeout: 120 * time.Second, cleanupTimeout: 10 * time.Second, concurrency: 3}
+	return options{namespace: "default", output: "default", image: "alpine:3.23", logLevel: "warn", timeout: 120 * time.Second, cleanupTimeout: 10 * time.Second, concurrency: 3}
 }
 
 // NewCommand creates independent options, dependencies, and output state.
@@ -59,7 +59,7 @@ func NewCommand(deps Dependencies) *cobra.Command {
 	f.StringSliceVarP(&o.excludes, "exclude", "e", nil, "Paths excluded from totals (repeatable)")
 	f.StringVarP(&o.output, "output", "o", o.output, "Output: default, table, json, yaml")
 	f.StringVarP(&o.image, "image", "i", o.image, "Temporary pod image with sh, mktemp, cat, chmod, rm")
-	f.StringVar(&o.logLevel, "log-level", "", "Log level: debug, info, warn, error")
+	f.StringVar(&o.logLevel, "log-level", o.logLevel, "Log level: debug, info, warn, error")
 	return c
 }
 
