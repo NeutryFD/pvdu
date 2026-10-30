@@ -1,19 +1,65 @@
 name: ci
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: unit + integration (KinD)
+  lint:
+    name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # cmd/pvdu embeds the scanner payloads, so they must exist to type-check.
+      - name: Build scanner payloads
+        run: make scanner
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: make build
+
+      - name: Vet
+        run: make vet
+
+      - name: Unit tests
+        run: make test-unit
+
+  integration:
+    name: integration tests (KinD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -28,8 +74,19 @@ jobs:
           chmod +x kind
           ./kind create cluster --wait 120s
 
-      - name: Unit tests
-        run: make test-unit
-
       - name: Integration tests
         run: make test-integration
+
+  # Single required check for branch protection: it fails unless every job above passed.
+  ci-success:
+    name: ci-success
+    if: ${{ always() }}
+    needs: [lint, unit, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all jobs to succeed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
+            echo "One or more required jobs did not succeed."
+            exit 1
+          fi
