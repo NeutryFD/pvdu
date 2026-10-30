@@ -75,9 +75,10 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 		sr, err := r.deps.UploadAndScan(scanCtx, client, config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
 		err = scanError(sr, err)
 		if err != nil {
-			if ctx.Err() != nil {
+			switch {
+			case ctx.Err() != nil:
 				r.fail(result, ctx, ctx.Err())
-			} else if r.options.force {
+			case r.options.force:
 				if r.options.logLevel == "debug" {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("existing pod scan failed; temporary-pod fallback: %v", err))
 				}
@@ -87,7 +88,7 @@ func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, confi
 					result.Error = fmt.Sprintf("existing pod scan: %v; temporary pod scan: %s", err, result.Error)
 				}
 				return
-			} else {
+			default:
 				r.fail(result, scanCtx, err)
 			}
 			cancel()

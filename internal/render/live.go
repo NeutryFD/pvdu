@@ -63,7 +63,7 @@ func (t *LiveTable) Finish() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.terminal != nil {
-		defer io.WriteString(t.w, "\033[?25h")
+		defer func() { _, _ = io.WriteString(t.w, "\033[?25h") }()
 	}
 	if t.err != nil {
 		return t.err
