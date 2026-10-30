@@ -75,7 +75,9 @@ CLI builds for Linux and macOS embed separate Linux amd64 and arm64 scanners and
 
 ```bash
 make build    # Builds scanner, embeds it into pvdu, produces single binary
-make test     # Builds scanner, runs unit + integration tests
+make test-unit         # Tests that need no cluster, with the race detector
+make test-integration  # Full suite; needs a cluster (sets PVDU_E2E=1)
+make lint              # golangci-lint
 make clean    # Removes build artifacts
 ```
 
