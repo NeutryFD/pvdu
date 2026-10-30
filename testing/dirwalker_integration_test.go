@@ -11,7 +11,7 @@ import (
 	"github.com/NeutryFD/dirwalker"
 )
 
-// scanLine mirrors internal/k8s/exec.go's wire contract for the scanner's
+// scanLine mirrors internal/scanner/stream.go's wire contract for the scanner's
 // json-lines output. This is the integration contract between pvdu and the
 // dirwalker binary built at the pinned module version.
 type scanLine struct {
