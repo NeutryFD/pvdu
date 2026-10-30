@@ -12,8 +12,8 @@ build: scanner
 
 scanner:
 	@mkdir -p cmd/pvdu/scanners
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cmd/pvdu/scanners/dirwalker-linux-amd64 github.com/NeutryFD/dirwalker/cmd/dirwalker
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o cmd/pvdu/scanners/dirwalker-linux-arm64 github.com/NeutryFD/dirwalker/cmd/dirwalker
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o cmd/pvdu/scanners/dirwalker-linux-amd64 github.com/NeutryFD/dirwalker/cmd/dirwalker
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o cmd/pvdu/scanners/dirwalker-linux-arm64 github.com/NeutryFD/dirwalker/cmd/dirwalker
 
 run: build
 	$(BIN_DIR)/pvdu $(ARGS)
