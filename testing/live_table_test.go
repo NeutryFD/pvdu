@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/neutry/pvdu/internal/model"
-	"github.com/neutry/pvdu/internal/ui"
+	"github.com/neutry/pvdu/internal/render"
 )
 
 func TestLiveTableTerminalRedraw(t *testing.T) {
@@ -70,7 +70,7 @@ func TestLiveTableUpdatesStatusAndDefersDiagnostics(t *testing.T) {
 		{Namespace: "monitoring", PVCName: "claim-a", Status: model.StatusPending},
 		{Namespace: "monitoring", PVCName: "claim-b", Status: model.StatusPending},
 	}
-	live, err := ui.NewLiveTable(&output, "default", results)
+	live, err := render.NewLiveTable(&output, "default", results)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestLiveTableUpdatesStatusAndDefersDiagnostics(t *testing.T) {
 }
 
 func TestTableDiagnosticsAreSingleLine(t *testing.T) {
-	got := ui.RenderDefault([]*model.ScanResult{{
+	got := render.RenderDefault([]*model.ScanResult{{
 		Namespace: "monitoring", PVCName: "claim", Status: model.StatusError,
 		Error:    "upload scanner: exit 125 (mktemp: Read-only file system\n)",
 		Warnings: []string{"cleanup failed\n retry later"},

@@ -1,10 +1,10 @@
-package cmd
+package cli
 
 import (
 	"context"
 	"time"
 
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/kube"
 	"github.com/neutry/pvdu/internal/model"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -15,12 +15,12 @@ import (
 // independent commands with NewCommand and Dependencies instead of global hooks.
 type TestingHooks struct {
 	BuildClient     func(string, string) (kubernetes.Interface, *rest.Config, error)
-	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error)
-	GetPVCByName    func(context.Context, kubernetes.Interface, string, string) (*k8s.PVCInfo, error)
+	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error)
+	GetPVCByName    func(context.Context, kubernetes.Interface, string, string) (*kube.PVCInfo, error)
 	CreateTempPod   func(context.Context, kubernetes.Interface, string, string, string) (string, error)
 	WaitForPodReady func(context.Context, kubernetes.Interface, string, string, time.Duration) error
 	DeletePod       func(context.Context, kubernetes.Interface, string, string) error
-	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
+	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
 }
 
 // Legacy test state is never consulted by production commands.
@@ -42,13 +42,13 @@ func legacyRunner() *runner {
 	h := legacyHooks
 	d := Dependencies{BuildClient: h.BuildClient, ListPVCs: h.ListPVCs, GetPVCByName: h.GetPVCByName, WaitForPodReady: h.WaitForPodReady, UploadAndScan: h.UploadAndScan}
 	if h.CreateTempPod != nil {
-		d.CreatePod = func(ctx context.Context, client kubernetes.Interface, pvc k8s.PVCInfo, image string) (k8s.PodRef, error) {
+		d.CreatePod = func(ctx context.Context, client kubernetes.Interface, pvc kube.PVCInfo, image string) (kube.PodRef, error) {
 			name, err := h.CreateTempPod(ctx, client, pvc.Namespace, pvc.Name, image)
-			return k8s.PodRef{Name: name}, err
+			return kube.PodRef{Name: name}, err
 		}
 	}
 	if h.DeletePod != nil {
-		d.DeletePod = func(ctx context.Context, client kubernetes.Interface, ns string, pod k8s.PodRef) error {
+		d.DeletePod = func(ctx context.Context, client kubernetes.Interface, ns string, pod kube.PodRef) error {
 			return h.DeletePod(ctx, client, ns, pod.Name)
 		}
 	}
@@ -57,10 +57,10 @@ func legacyRunner() *runner {
 	return r
 }
 
-func RunTempPodScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo) {
+func RunTempPodScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc kube.PVCInfo) {
 	legacyRunner().scanWithTempPod(ctx, client, config, result, pvc)
 }
-func RunPVCScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo, force bool) {
+func RunPVCScanForTesting(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc kube.PVCInfo, force bool) {
 	r := legacyRunner()
 	r.options.force = force
 	r.scanPVC(ctx, client, config, 0, result, pvc)

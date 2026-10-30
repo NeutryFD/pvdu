@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/kube"
 )
 
 const testNamespace = "default"
@@ -32,7 +32,7 @@ func staleTempPod(name string) *corev1.Pod {
 }
 
 func TestBuildTempPodNameShortPVC(t *testing.T) {
-	got := k8s.BuildTempPodName("data")
+	got := kube.BuildTempPodName("data")
 	want := "pvdu-scanner-data"
 	if got != want {
 		t.Fatalf("BuildTempPodName(\"data\") = %q, want %q", got, want)
@@ -50,7 +50,7 @@ func TestCreateTempPodTruncatedName(t *testing.T) {
 	want := "pvdu-scanner-" + strings.Repeat("a", 49)
 	cs := fake.NewSimpleClientset()
 
-	got, err := k8s.CreateTempPod(context.Background(), cs, testNamespace, pvc, "scan-image:v1")
+	got, err := kube.CreateTempPod(context.Background(), cs, testNamespace, pvc, "scan-image:v1")
 	if err != nil {
 		t.Fatalf("CreateTempPod returned error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestCreateTempPodNoCreateOnStaleDeleteFail(t *testing.T) {
 		return true, nil, deniedErr
 	})
 
-	_, err := k8s.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
+	_, err := kube.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
 	if err == nil {
 		t.Fatalf("expected a non-nil error, got nil")
 	}
@@ -88,7 +88,7 @@ func TestCreateTempPodNoCreateOnStaleDeleteFail(t *testing.T) {
 func TestCreateTempPodDeleteOrderedBeforeCreate(t *testing.T) {
 	cs := fake.NewSimpleClientset(staleTempPod("pvdu-scanner-data"))
 
-	got, err := k8s.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
+	got, err := kube.CreateTempPod(context.Background(), cs, testNamespace, "data", "scan-image:v1")
 	if err != nil {
 		t.Fatalf("CreateTempPod returned error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRemoveStalePodDeadlineExpiry(t *testing.T) {
 	})
 
 	start := time.Now()
-	err := k8s.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
+	err := kube.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
 	if err == nil {
 		t.Fatalf("expected a non-nil error, got nil")
 	}
@@ -170,7 +170,7 @@ func TestRemoveStalePodWrappedError(t *testing.T) {
 		return true, nil, stuckErr
 	})
 
-	err := k8s.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
+	err := kube.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
 	if err == nil {
 		t.Fatalf("expected a non-nil error, got nil")
 	}
@@ -192,7 +192,7 @@ func TestRemoveStalePodPollWrappedError(t *testing.T) {
 		return true, nil, stuckErr
 	})
 
-	err := k8s.RemoveStalePod(context.Background(), cs, testNamespace, pod.Name, time.Second)
+	err := kube.RemoveStalePod(context.Background(), cs, testNamespace, pod.Name, time.Second)
 	if err == nil {
 		t.Fatalf("expected a non-nil error, got nil")
 	}
@@ -214,7 +214,7 @@ func TestRemoveStalePodDeletesAndWaitsGone(t *testing.T) {
 		return false, nil, nil
 	})
 
-	err := k8s.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
+	err := kube.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
 	if err != nil {
 		t.Fatalf("RemoveStalePod returned error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestRemoveStalePodDeletesAndWaitsGone(t *testing.T) {
 
 func TestRemoveStalePodMissingPodNil(t *testing.T) {
 	cs := fake.NewSimpleClientset()
-	err := k8s.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
+	err := kube.RemoveStalePod(context.Background(), cs, testNamespace, "pvdu-scanner-data", time.Second)
 	if err != nil {
 		t.Fatalf("RemoveStalePod on missing pod returned error: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestRemoveStalePodMissingPodNil(t *testing.T) {
 }
 
 func TestBuildTempPodNameSingleLabel(t *testing.T) {
-	got := k8s.BuildTempPodName("my.pvc-name")
+	got := kube.BuildTempPodName("my.pvc-name")
 	want := "pvdu-scanner-my.pvc-name"
 	if got != want {
 		t.Fatalf("BuildTempPodName(\"my.pvc-name\") = %q, want %q", got, want)
@@ -272,7 +272,7 @@ func TestBuildTempPodNameSingleLabel(t *testing.T) {
 }
 
 func TestBuildTempPodNameTrimsWholePVCPortion(t *testing.T) {
-	got := k8s.BuildTempPodName(strings.Repeat("-", 60))
+	got := kube.BuildTempPodName(strings.Repeat("-", 60))
 	want := "pvdu-scanner"
 	if got != want {
 		t.Fatalf("BuildTempPodName(60 dashes) = %q, want %q", got, want)
@@ -290,7 +290,7 @@ func TestBuildTempPodNameTrimsWholePVCPortion(t *testing.T) {
 
 func TestBuildTempPodNameTrimsTrailingDashes(t *testing.T) {
 	pvc := strings.Repeat("x", 48) + strings.Repeat("-", 20)
-	got := k8s.BuildTempPodName(pvc)
+	got := kube.BuildTempPodName(pvc)
 	want := "pvdu-scanner-" + strings.Repeat("x", 48)
 	if got != want {
 		t.Fatalf("BuildTempPodName(48 x + 20 dashes) = %q, want %q", got, want)
@@ -305,7 +305,7 @@ func TestBuildTempPodNameTrimsTrailingDashes(t *testing.T) {
 
 func TestBuildTempPodNameTruncatesTo63(t *testing.T) {
 	pvc := strings.Repeat("a", 80)
-	got := k8s.BuildTempPodName(pvc)
+	got := kube.BuildTempPodName(pvc)
 	want := "pvdu-scanner-" + strings.Repeat("a", 49)
 	if got != want {
 		t.Fatalf("BuildTempPodName(80 a's) = %q, want %q", got, want)

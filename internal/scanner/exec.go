@@ -1,4 +1,4 @@
-package k8s
+package scanner
 
 import (
 	"bufio"
@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/neutry/pvdu/internal/kube"
 	"io"
 	"log/slog"
 	"strings"
@@ -25,8 +26,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ScannerBinaries is initialized once at startup, keyed by Linux architecture.
-var ScannerBinaries map[string][]byte
+// Binaries is initialized once at startup, keyed by Linux architecture.
+var Binaries map[string][]byte
 
 type scanLine struct {
 	Type string `json:"type"`
@@ -40,15 +41,15 @@ type UploadError struct{ Err error }
 func (e *UploadError) Error() string { return "upload scanner: " + e.Err.Error() }
 func (e *UploadError) Unwrap() error { return e.Err }
 
-func UploadAndScanPVC(ctx context.Context, client kubernetes.Interface, config *rest.Config, namespace, podName, containerName, writableDir, mountPath string, pvc *PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
+func UploadAndScan(ctx context.Context, client kubernetes.Interface, config *rest.Config, namespace, podName, containerName, writableDir, mountPath string, pvc *kube.PVCInfo, maxDepth int, excludes []string, workers int, reportFiles bool) (*model.ScanResult, error) {
 	if reportFiles {
 		return nil, fmt.Errorf("file-level output is not supported; omit --files")
 	}
-	argv, err := ScannerExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
+	argv, err := ExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
 	if err != nil {
 		return nil, err
 	}
-	gzipArgv, err := CompressedScannerExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
+	gzipArgv, err := CompressedExecCommand(writableDir+"/.pvdu-scanner", mountPath, maxDepth, excludes, workers, false)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +61,7 @@ func UploadAndScanPVC(ctx context.Context, client kubernetes.Interface, config *
 	if err != nil {
 		return nil, fmt.Errorf("resolve scanner architecture: %w", err)
 	}
-	binary, err := ScannerForPlatform(node.Status.NodeInfo.OperatingSystem, node.Status.NodeInfo.Architecture)
+	binary, err := ForPlatform(node.Status.NodeInfo.OperatingSystem, node.Status.NodeInfo.Architecture)
 	if err != nil {
 		return nil, err
 	}
@@ -69,9 +70,9 @@ func UploadAndScanPVC(ctx context.Context, client kubernetes.Interface, config *
 		if err != nil {
 			return 0, "", err
 		}
-		NotifyScanProgress(ctx, "", fmt.Sprintf("exec %s/%s container=%s argv=%q", namespace, podName, containerName, argv))
-		NotifyScanProgress(ctx, model.StatusUploading, "")
-		return ScanStream(ctx, func(ctx context.Context, out, diagnostic io.Writer) error {
+		NotifyProgress(ctx, "", fmt.Sprintf("exec %s/%s container=%s argv=%q", namespace, podName, containerName, argv))
+		NotifyProgress(ctx, model.StatusUploading, "")
+		return Stream(ctx, func(ctx context.Context, out, diagnostic io.Writer) error {
 			return executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: bytes.NewReader(payload), Stdout: out, Stderr: diagnostic})
 		})
 	}
@@ -121,26 +122,26 @@ func compressedScanner(arch string, binary []byte) []byte {
 	return compress.(func() []byte)()
 }
 
-func ScannerForPlatform(os, arch string) ([]byte, error) {
+func ForPlatform(os, arch string) ([]byte, error) {
 	if os != "linux" {
 		return nil, fmt.Errorf("unsupported pod OS %q: Linux required", os)
 	}
-	binary := ScannerBinaries[arch]
+	binary := Binaries[arch]
 	if len(binary) == 0 {
 		return nil, fmt.Errorf("no embedded scanner for linux/%s (supported: amd64, arm64; run make build)", arch)
 	}
 	return binary, nil
 }
 
-// ScannerExecCommand never interpolates caller values into shell source.
+// ExecCommand never interpolates caller values into shell source.
 // The path argument selects scratch space; its basename is never overwritten.
-func ScannerExecCommand(scannerPath, mountPath string, maxDepth int, excludes []string, workers int, reportFiles bool) ([]string, error) {
+func ExecCommand(scannerPath, mountPath string, maxDepth int, excludes []string, workers int, reportFiles bool) ([]string, error) {
 	return scannerExecCommand(scannerPath, mountPath, maxDepth, excludes, workers, reportFiles, "")
 }
 
-// CompressedScannerExecCommand is ScannerExecCommand for a gzipped scanner on
+// CompressedExecCommand is ExecCommand for a gzipped scanner on
 // stdin. It exits 124 without reading stdin if the pod has no gunzip.
-func CompressedScannerExecCommand(scannerPath, mountPath string, maxDepth int, excludes []string, workers int, reportFiles bool) ([]string, error) {
+func CompressedExecCommand(scannerPath, mountPath string, maxDepth int, excludes []string, workers int, reportFiles bool) ([]string, error) {
 	return scannerExecCommand(scannerPath, mountPath, maxDepth, excludes, workers, reportFiles, "gzip")
 }
 
@@ -200,9 +201,9 @@ func (b *boundedDiagnostic) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// ScanStream joins the producer before returning, including when parsing fails.
+// Stream joins the producer before returning, including when parsing fails.
 // Stream must obey cancellation, as remotecommand.StreamWithContext does.
-func ScanStream(ctx context.Context, stream func(context.Context, io.Writer, io.Writer) error) (int64, string, error) {
+func Stream(ctx context.Context, stream func(context.Context, io.Writer, io.Writer) error) (int64, string, error) {
 	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -216,7 +217,7 @@ func ScanStream(ctx context.Context, stream func(context.Context, io.Writer, io.
 		done <- err
 	}()
 	used, parseErr := parseScannerOutput(r, nil, func() {
-		NotifyScanProgress(ctx, model.StatusScanning, "")
+		NotifyProgress(ctx, model.StatusScanning, "")
 	})
 	_ = r.CloseWithError(parseErr)
 	if parseErr != nil {
@@ -238,8 +239,8 @@ func ScanStream(ctx context.Context, stream func(context.Context, io.Writer, io.
 	return used, diagnostic.String(), parseErr
 }
 
-// ParseScannerOutput requires one terminal done record and bounds each record.
-func ParseScannerOutput(r io.Reader, progress dirwalker.ProgressFn) (int64, error) {
+// ParseOutput requires one terminal done record and bounds each record.
+func ParseOutput(r io.Reader, progress dirwalker.ProgressFn) (int64, error) {
 	return parseScannerOutput(r, progress, nil)
 }
 
@@ -304,6 +305,6 @@ func parseScannerOutput(r io.Reader, progress dirwalker.ProgressFn, started func
 	return total, nil
 }
 
-func ParseScannerProgress(output string, progress dirwalker.ProgressFn) (int64, error) {
-	return ParseScannerOutput(strings.NewReader(output), progress)
+func ParseProgress(output string, progress dirwalker.ProgressFn) (int64, error) {
+	return ParseOutput(strings.NewReader(output), progress)
 }

@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -11,9 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/neutry/pvdu/internal/k8s"
+	"github.com/neutry/pvdu/internal/kube"
 	"github.com/neutry/pvdu/internal/model"
-	"github.com/neutry/pvdu/internal/ui"
+	"github.com/neutry/pvdu/internal/render"
+	"github.com/neutry/pvdu/internal/scanner"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
@@ -24,12 +25,12 @@ import (
 // Dependencies describes external boundaries; omitted functions use production implementations.
 type Dependencies struct {
 	BuildClient     func(string, string) (kubernetes.Interface, *rest.Config, error)
-	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]k8s.PVCInfo, error)
-	GetPVCByName    func(context.Context, kubernetes.Interface, string, string) (*k8s.PVCInfo, error)
-	CreatePod       func(context.Context, kubernetes.Interface, k8s.PVCInfo, string) (k8s.PodRef, error)
+	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error)
+	GetPVCByName    func(context.Context, kubernetes.Interface, string, string) (*kube.PVCInfo, error)
+	CreatePod       func(context.Context, kubernetes.Interface, kube.PVCInfo, string) (kube.PodRef, error)
 	WaitForPodReady func(context.Context, kubernetes.Interface, string, string, time.Duration) error
-	DeletePod       func(context.Context, kubernetes.Interface, string, k8s.PodRef) error
-	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *k8s.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
+	DeletePod       func(context.Context, kubernetes.Interface, string, kube.PodRef) error
+	UploadAndScan   func(context.Context, kubernetes.Interface, *rest.Config, string, string, string, string, string, *kube.PVCInfo, int, []string, int, bool) (*model.ScanResult, error)
 }
 
 type runner struct {
@@ -37,7 +38,7 @@ type runner struct {
 	deps         Dependencies
 	errOut       io.Writer
 	terminal     bool
-	liveTable    *ui.LiveTable
+	liveTable    *render.LiveTable
 	debugMu      sync.Mutex
 	debugDetails []string
 }
@@ -55,25 +56,25 @@ func (w *synchronizedWriter) Write(p []byte) (int, error) {
 
 func newRunner(d Dependencies) *runner {
 	if d.BuildClient == nil {
-		d.BuildClient = k8s.BuildClient
+		d.BuildClient = kube.BuildClient
 	}
 	if d.ListPVCs == nil {
-		d.ListPVCs = k8s.ListPVCs
+		d.ListPVCs = kube.ListPVCs
 	}
 	if d.GetPVCByName == nil {
-		d.GetPVCByName = k8s.GetPVCByName
+		d.GetPVCByName = kube.GetPVCByName
 	}
 	if d.CreatePod == nil {
-		d.CreatePod = k8s.CreateScanPod
+		d.CreatePod = kube.CreateScanPod
 	}
 	if d.WaitForPodReady == nil {
-		d.WaitForPodReady = k8s.WaitForPodReady
+		d.WaitForPodReady = kube.WaitForPodReady
 	}
 	if d.DeletePod == nil {
-		d.DeletePod = k8s.DeleteScanPod
+		d.DeletePod = kube.DeleteScanPod
 	}
 	if d.UploadAndScan == nil {
-		d.UploadAndScan = k8s.UploadAndScanPVC
+		d.UploadAndScan = scanner.UploadAndScan
 	}
 	return &runner{options: defaultOptions(), deps: d, errOut: os.Stderr}
 }
@@ -81,7 +82,7 @@ func newRunner(d Dependencies) *runner {
 func (r *runner) run(cmd *cobra.Command) error {
 	o := r.options
 	// Validate scanner arguments before even building a Kubernetes client.
-	if _, err := k8s.ScannerExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers, false); err != nil {
+	if _, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers, false); err != nil {
 		return err
 	}
 	if file, ok := cmd.ErrOrStderr().(*os.File); ok {
@@ -98,7 +99,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 	if o.allNamespaces {
 		ns = ""
 	}
-	var pvcs []k8s.PVCInfo
+	var pvcs []kube.PVCInfo
 	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, o.timeout)
 	defer discoveryCancel()
 	if o.pvc != "" {
@@ -106,7 +107,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 		if err != nil {
 			return fmt.Errorf("get PVC: %w", err)
 		}
-		pvcs = []k8s.PVCInfo{*pvc}
+		pvcs = []kube.PVCInfo{*pvc}
 	} else {
 		pvcs, err = r.deps.ListPVCs(discoveryCtx, client, ns)
 		if err != nil {
@@ -127,7 +128,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 	}
 	if o.output == "default" || o.output == "table" {
 		if file, ok := cmd.OutOrStdout().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-			liveTable, err := ui.NewLiveTable(cmd.OutOrStdout(), o.output, results)
+			liveTable, err := render.NewLiveTable(cmd.OutOrStdout(), o.output, results)
 			if err != nil {
 				return fmt.Errorf("start live table: %w", err)
 			}
@@ -146,7 +147,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 		return ctx.Err()
 	}
 	if r.liveTable == nil {
-		if err := ui.WriteResults(cmd.OutOrStdout(), o.output, results); err != nil {
+		if err := render.WriteResults(cmd.OutOrStdout(), o.output, results); err != nil {
 			return err
 		}
 	}
@@ -168,7 +169,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 	return nil
 }
 
-func (r *runner) scanAll(ctx context.Context, client kubernetes.Interface, config *rest.Config, results []*model.ScanResult, pvcs []k8s.PVCInfo) {
+func (r *runner) scanAll(ctx context.Context, client kubernetes.Interface, config *rest.Config, results []*model.ScanResult, pvcs []kube.PVCInfo) {
 	sem := make(chan struct{}, r.options.concurrency)
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -194,8 +195,8 @@ func (r *runner) scanAll(ctx context.Context, client kubernetes.Interface, confi
 	}
 }
 
-func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, config *rest.Config, index int, result *model.ScanResult, pvc k8s.PVCInfo) {
-	ctx = k8s.WithScanObserver(ctx, func(status model.ScanStatus, detail string) {
+func (r *runner) scanPVC(ctx context.Context, client kubernetes.Interface, config *rest.Config, index int, result *model.ScanResult, pvc kube.PVCInfo) {
+	ctx = scanner.WithObserver(ctx, func(status model.ScanStatus, detail string) {
 		if status != "" {
 			result.Status = status
 			r.publishResult(index, result)
@@ -275,7 +276,7 @@ func scanError(result *model.ScanResult, err error) error {
 	return nil
 }
 
-func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc k8s.PVCInfo) {
+func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interface, config *rest.Config, result *model.ScanResult, pvc kube.PVCInfo) {
 	if ctx.Err() != nil {
 		r.fail(result, ctx, ctx.Err())
 		return
@@ -283,7 +284,7 @@ func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interfac
 	opCtx, cancel := context.WithTimeout(ctx, r.options.timeout)
 	defer cancel()
 	result.PodName, result.ScanPath = "", "/mnt"
-	k8s.NotifyScanProgress(ctx, model.StatusCreatingPod, "")
+	scanner.NotifyProgress(ctx, model.StatusCreatingPod, "")
 	r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: creating temporary pod", pvc.Namespace, pvc.Name))
 	pod, err := r.deps.CreatePod(opCtx, client, pvc, r.options.image)
 	if err != nil {
@@ -291,7 +292,7 @@ func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interfac
 		return
 	}
 	result.PodName, result.ScanPath = pod.Name, "/mnt"
-	k8s.NotifyScanProgress(ctx, model.StatusWaitingPod, "")
+	scanner.NotifyProgress(ctx, model.StatusWaitingPod, "")
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), r.options.cleanupTimeout)
 		defer cleanupCancel()
@@ -304,7 +305,7 @@ func (r *runner) scanWithTempPod(ctx context.Context, client kubernetes.Interfac
 		r.fail(result, opCtx, err)
 		return
 	}
-	k8s.NotifyScanProgress(ctx, model.StatusPodReady, "")
+	scanner.NotifyProgress(ctx, model.StatusPodReady, "")
 	r.messageAt(slog.LevelInfo, fmt.Sprintf("%s/%s: uploading scanner and scanning temporary pod %s:/mnt", pvc.Namespace, pvc.Name, pod.Name))
 	sr, err := r.deps.UploadAndScan(opCtx, client, config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, r.options.maxDepth, r.options.excludes, r.options.workers, false)
 	if ctx.Err() != nil {
