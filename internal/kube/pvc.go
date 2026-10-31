@@ -29,6 +29,7 @@ type PVCInfo struct {
 	PVName         string
 	PVBytes        int64
 	PVStr          string
+	StorageClass   string
 	Mounts         []PodMount
 	VolumeMode     corev1.PersistentVolumeMode
 	AccessModes    []corev1.PersistentVolumeAccessMode
@@ -80,6 +81,9 @@ func describePVCs(ctx context.Context, client kubernetes.Interface, pvcs []corev
 		if pvc.Spec.VolumeMode != nil {
 			info.VolumeMode = *pvc.Spec.VolumeMode
 		}
+		if pvc.Spec.StorageClassName != nil {
+			info.StorageClass = *pvc.Spec.StorageClassName
+		}
 		if req, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
 			info.RequestedBytes, info.RequestedStr = req.Value(), req.String()
 		}
@@ -95,6 +99,10 @@ func describePVCs(ctx context.Context, client kubernetes.Interface, pvcs []corev
 			}
 			if capacity, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
 				info.PVBytes, info.PVStr = capacity.Value(), capacity.String()
+			}
+			// A PVC relying on the default class may not record it; its PV does.
+			if info.StorageClass == "" {
+				info.StorageClass = pv.Spec.StorageClassName
 			}
 		}
 		infos = append(infos, info)
