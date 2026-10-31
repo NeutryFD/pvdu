@@ -89,6 +89,9 @@ func (r *runner) run(cmd *cobra.Command) error {
 	if _, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers); err != nil {
 		return err
 	}
+	if o.tui {
+		return r.runTUI(cmd)
+	}
 	if file, ok := cmd.ErrOrStderr().(*os.File); ok {
 		r.terminal = term.IsTerminal(int(file.Fd()))
 	}

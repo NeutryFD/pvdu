@@ -2,23 +2,26 @@ package cli
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/neutry/pvdu/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 var version = "dev"
 
 type options struct {
-	kubeconfig, context, namespace, pvc, output, image, logLevel string
-	allNamespaces, force                                         bool
-	timeout, cleanupTimeout                                      time.Duration
-	concurrency, maxDepth, workers                               int
-	excludes                                                     []string
+	kubeconfig, context, namespace, pvc, output, image, logLevel, theme string
+	allNamespaces, force, tui                                           bool
+	timeout, cleanupTimeout                                             time.Duration
+	concurrency, maxDepth, workers                                      int
+	excludes                                                            []string
 }
 
 func defaultOptions() options {
-	return options{namespace: "default", output: "default", image: "alpine:3.23", logLevel: "warn", timeout: 120 * time.Second, cleanupTimeout: 10 * time.Second, concurrency: 3}
+	return options{namespace: "default", output: "default", image: "alpine:3.23", logLevel: "warn", theme: tui.DefaultTheme, timeout: 120 * time.Second, cleanupTimeout: 10 * time.Second, concurrency: 3}
 }
 
 // NewCommand creates independent options, dependencies, and output state.
@@ -60,6 +63,8 @@ func NewCommand(deps Dependencies) *cobra.Command {
 	f.StringVarP(&o.output, "output", "o", o.output, "Output: default, table, json, yaml")
 	f.StringVarP(&o.image, "image", "i", o.image, "Temporary pod image with sh, mktemp, cat, chmod, rm")
 	f.StringVar(&o.logLevel, "log-level", o.logLevel, "Log level: debug, info, warn, error")
+	f.BoolVar(&o.tui, "tui", false, "Browse PVCs interactively and choose which to scan")
+	f.StringVar(&o.theme, "theme", o.theme, "TUI colour theme: "+strings.Join(tui.ThemeNames(), ", "))
 	return c
 }
 
@@ -86,6 +91,12 @@ func (o options) validate(explicitNamespace bool) error {
 	case "default", "table", "json", "yaml":
 	default:
 		return fmt.Errorf("invalid output format %q", o.output)
+	}
+	if !slices.Contains(tui.ThemeNames(), o.theme) {
+		return fmt.Errorf("invalid theme %q; choose one of %s", o.theme, strings.Join(tui.ThemeNames(), ", "))
+	}
+	if o.tui && (o.output == "json" || o.output == "yaml") {
+		return fmt.Errorf("--tui cannot be combined with --output %s", o.output)
 	}
 	switch o.logLevel {
 	case "", "debug", "info", "warn", "error":
