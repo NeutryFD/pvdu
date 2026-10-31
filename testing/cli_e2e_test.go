@@ -70,6 +70,11 @@ func runPvdu(t *testing.T, bin string, args ...string) (string, string, error) {
 			}
 		}
 	}
+	return runBinary(t, bin, args...)
+}
+
+func runBinary(t *testing.T, bin string, args ...string) (string, string, error) {
+	t.Helper()
 	cmd := exec.CommandContext(t.Context(), bin, args...)
 	if !e2eEnabled() {
 		// Point at a missing file so nothing can reach an ambient cluster.
