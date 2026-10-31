@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/NeutryFD/dirwalker"
-	"github.com/neutry/pvdu/internal/kube"
 	"github.com/neutry/pvdu/internal/model"
+	"github.com/neutry/pvdu/internal/render"
 )
 
 // The header is two lines: the title and a line for input or messages.
@@ -92,48 +92,42 @@ func (m *Model) layout() {
 
 func (m *Model) allNamespaces() bool { return m.namespace == "" }
 
-// Fixed column widths. STATUS fits a one-cell animation, a space and
-// "CREATING POD".
-const sizeWidth, percentWidth, statusWidth, minNameWidth = 9, 5, 14, 8
-
-// nameTitles are the leading columns of a row, as built by row; the fixed
-// columns follow them.
-func (m *Model) nameTitles() []string {
-	titles := []string{"POD", "PVC", "PV", "STORAGE CLASS"}
-	if m.allNamespaces() {
-		titles = append([]string{"NAMESPACE"}, titles...)
-	}
-	return titles
-}
-
-// dropOrder lists the name columns hidden first on a narrow terminal; the
-// detail view still shows them.
-var dropOrder = []string{"PV", "STORAGE CLASS", "POD"}
+const minNameWidth = 8
 
 // columns fits the table to the terminal width. It hides name columns in
-// dropOrder until the rest get minNameWidth, then shares the width left by
+// priority order until the rest get minNameWidth, then shares the width left by
 // the fixed columns between them in proportion to their longest value, so
 // the table always spans the screen. It returns the columns and the row
 // indices they show. Each cell has one space of padding on each side.
 func (m *Model) columns(rows []table.Row) ([]table.Column, []int) {
-	titles := m.nameTitles()
-	keep := make([]int, len(titles))
-	for i := range keep {
-		keep[i] = i
+	schema := render.Columns(m.allNamespaces())
+	keep, fixed, drops := []int{}, []int{}, []int{}
+	fixedWidth := 0
+	for i, column := range schema {
+		if column.Width > 0 {
+			fixed = append(fixed, i)
+			fixedWidth += column.Width + 2
+		} else {
+			keep = append(keep, i)
+		}
+		if column.HidePriority > 0 {
+			drops = append(drops, i)
+		}
 	}
+	slices.SortFunc(drops, func(a, b int) int { return schema[a].HidePriority - schema[b].HidePriority })
 	freeFor := func(names int) int {
-		return m.width - 3*sizeWidth - percentWidth - statusWidth - 2*(names+5)
+		return m.width - fixedWidth - 2*names
 	}
-	for _, drop := range dropOrder {
+	for _, drop := range drops {
 		if freeFor(len(keep)) >= len(keep)*minNameWidth {
 			break
 		}
-		keep = slices.DeleteFunc(keep, func(i int) bool { return titles[i] == drop })
+		keep = slices.DeleteFunc(keep, func(i int) bool { return i == drop })
 	}
 	widths := make([]int, len(keep))
 	total := 0
 	for j, i := range keep {
-		widths[j] = lipgloss.Width(titles[i])
+		widths[j] = lipgloss.Width(schema[i].Title)
 		for _, row := range rows {
 			widths[j] = max(widths[j], lipgloss.Width(row[i]))
 		}
@@ -158,20 +152,15 @@ func (m *Model) columns(rows []table.Row) ([]table.Column, []int) {
 		}
 		widths[len(widths)-1] += free - used
 	}
-	columns := make([]table.Column, 0, len(keep)+5)
+	columns := make([]table.Column, 0, len(keep)+len(fixed))
 	for j, i := range keep {
-		columns = append(columns, table.Column{Title: titles[i], Width: widths[j]})
+		columns = append(columns, table.Column{Title: schema[i].Title, Width: widths[j]})
 	}
-	for i := len(titles); i < len(titles)+5; i++ {
+	for _, i := range fixed {
 		keep = append(keep, i)
+		columns = append(columns, table.Column{Title: schema[i].Title, Width: schema[i].Width})
 	}
-	return append(columns,
-		table.Column{Title: "REQUESTED", Width: sizeWidth},
-		table.Column{Title: "SIZE", Width: sizeWidth},
-		table.Column{Title: "USED", Width: sizeWidth},
-		table.Column{Title: "%", Width: percentWidth},
-		table.Column{Title: "STATUS", Width: statusWidth},
-	), keep
+	return columns, keep
 }
 
 // refresh recomputes the visible PVCs, table rows and columns, keeping the
@@ -213,36 +202,30 @@ func (m *Model) refresh() {
 }
 
 func (m *Model) row(e *entry) table.Row {
-	r := e.result
-	name := "  " + e.pvc.Name
-	if e.marked {
-		name = "● " + e.pvc.Name
-	}
-	used, percent := "-", "-"
-	if r.Status == model.StatusDone {
-		used = dirwalker.FormatBytesShort(r.UsedBytes)
-		percent = usagePercent(r)
-	}
-	row := table.Row{orDash(mountingPod(e.pvc)), name, orDash(e.pvc.PVName), orDash(e.pvc.StorageClass), orDash(e.pvc.RequestedStr), formatBytes(e.pvc.PVBytes), used, percent, m.statusLabel(e)}
-	if m.allNamespaces() {
-		row = append(table.Row{e.pvc.Namespace}, row...)
+	columns := render.Columns(m.allNamespaces())
+	row := make(table.Row, len(columns))
+	for i, column := range columns {
+		row[i] = column.Value(e.result)
+		switch column.Title {
+		case "PVC":
+			prefix := "  "
+			if e.marked {
+				prefix = "● "
+			}
+			row[i] = prefix + row[i]
+		case "STATUS":
+			row[i] = m.statusLabel(e)
+		}
 	}
 	return row
 }
 
 func (m *Model) statusLabel(e *entry) string {
-	switch {
-	case e.result.Status == "":
-		return "-"
-	case e.result.Status == model.StatusPending:
-		return "QUEUED"
-	case e.result.Status == model.StatusError && e.result.Error == "interrupted":
-		return "CANCELLED"
-	}
-	label := strings.ToUpper(string(e.result.Status))
+	label := render.StatusLabel(e.result)
 	// Table cells are plain text: styling would break the selected row's
 	// highlight, so the animation keeps the cell colour.
-	if e.running && e.result.Status != model.StatusDone && e.result.Status != model.StatusError {
+	active := e.result.Status != "" && e.result.Status != model.StatusPending
+	if e.running && active && e.result.Status != model.StatusDone && e.result.Status != model.StatusError {
 		return busy.frame(m.elapsed()) + " " + label
 	}
 	return label
@@ -302,7 +285,7 @@ func (m *Model) detailView() string {
 	}
 	if r.PodName != "" {
 		scanned := r.PodName + ":" + r.ScanPath
-		if r.PodName != mountingPod(p) {
+		if r.PodName != r.MountingPodName {
 			scanned += m.st.label.Render("  (temporary pod, deleted after the scan)")
 		}
 		line("  Scanned", scanned)
@@ -340,38 +323,14 @@ func clip(content string, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// mountingPod is the pod that uses the PVC: the first whole-volume mount, as
-// a scan picks it, else any mount. A forced scan may read the volume through
-// a temporary pod instead, which the detail view shows.
-func mountingPod(pvc kube.PVCInfo) string {
-	for _, mount := range pvc.Mounts {
-		if mount.WholeVolume() {
-			return mount.PodName
-		}
-	}
-	if len(pvc.Mounts) > 0 {
-		return pvc.Mounts[0].PodName
-	}
-	return ""
-}
-
 func usagePercent(r model.ScanResult) string {
-	if r.RequestedBytes <= 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%.0f%%", 100*float64(r.UsedBytes)/float64(r.RequestedBytes))
+	return render.UsagePercent(r)
 }
 
 func formatBytes(n int64) string {
-	if n <= 0 {
-		return "-"
-	}
-	return dirwalker.FormatBytesShort(n)
+	return render.FormatBytes(n)
 }
 
 func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
+	return render.OrDash(s)
 }
