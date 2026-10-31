@@ -54,6 +54,9 @@ func writeScanFixture(t *testing.T, root string, files map[string]int64) int64 {
 }
 
 func TestScannerJSONLinesSchema(t *testing.T) {
+	// Scanner commands must stay independent of the Kubernetes e2e environment.
+	t.Setenv("PVDU_E2E", "1")
+	t.Setenv("PVDU_E2E_NAMESPACE", "arc-runners")
 	bin := buildDirwalker(t)
 
 	root := t.TempDir()
@@ -74,7 +77,7 @@ func TestScannerJSONLinesSchema(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			args := append([]string{root, "--output=json-lines", "--files"}, c.extraArgs...)
-			stdout, stderr, err := runPvdu(t, bin, args...)
+			stdout, stderr, err := runBinary(t, bin, args...)
 			if err != nil {
 				t.Fatalf("dirwalker scan failed: %v\nstderr: %s", err, stderr)
 			}
@@ -138,7 +141,7 @@ func TestScannerDoneLineOnlyWithoutFilesFlag(t *testing.T) {
 	root := t.TempDir()
 	wantTotal := writeScanFixture(t, root, map[string]int64{"only.txt": 7})
 
-	stdout, stderr, err := runPvdu(t, bin, root, "--output=json-lines")
+	stdout, stderr, err := runBinary(t, bin, root, "--output=json-lines")
 	if err != nil {
 		t.Fatalf("dirwalker scan failed: %v\nstderr: %s", err, stderr)
 	}
@@ -187,7 +190,7 @@ func TestScannerFormatBytesContract(t *testing.T) {
 func TestScannerNegativeMaxDepthErrors(t *testing.T) {
 	bin := buildDirwalker(t)
 
-	_, stderr, err := runPvdu(t, bin, t.TempDir(), "--max-depth=-1")
+	_, stderr, err := runBinary(t, bin, t.TempDir(), "--max-depth=-1")
 	if err == nil {
 		t.Fatal("expected scanner to exit non-zero for negative --max-depth")
 	}
@@ -212,7 +215,7 @@ func TestScannerReadErrorPropagates(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
-	_, stderr, err := runPvdu(t, bin, root, "--output=json-lines")
+	_, stderr, err := runBinary(t, bin, root, "--output=json-lines")
 	if err == nil {
 		t.Fatal("expected scanner to exit non-zero when a subdirectory becomes unreadable mid-walk")
 	}

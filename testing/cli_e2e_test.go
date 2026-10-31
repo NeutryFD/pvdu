@@ -57,6 +57,24 @@ func requireCluster(t *testing.T) {
 
 func runPvdu(t *testing.T, bin string, args ...string) (string, string, error) {
 	t.Helper()
+	if e2eEnabled() {
+		if namespace := os.Getenv("PVDU_E2E_NAMESPACE"); namespace != "" {
+			allNamespaces := false
+			for _, arg := range args {
+				if arg == "-A" || arg == "--all-namespaces" {
+					allNamespaces = true
+				}
+			}
+			if !allNamespaces {
+				args = append([]string{"-n", namespace}, args...)
+			}
+		}
+	}
+	return runBinary(t, bin, args...)
+}
+
+func runBinary(t *testing.T, bin string, args ...string) (string, string, error) {
+	t.Helper()
 	cmd := exec.CommandContext(t.Context(), bin, args...)
 	if !e2eEnabled() {
 		// Point at a missing file so nothing can reach an ambient cluster.
@@ -287,6 +305,12 @@ func TestAllNamespacesShortFlag(t *testing.T) {
 	bin := buildBinary(t)
 
 	stdout, stderr, err := runPvdu(t, bin, "-A")
+	if os.Getenv("PVDU_E2E_NAMESPACE") != "" {
+		if err == nil || !strings.Contains(strings.ToLower(stderr), "forbidden") {
+			t.Fatalf("scoped runner must not list PVCs cluster-wide: err=%v, stderr=%s", err, stderr)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("pvdu -A failed: %v\nstderr: %s", err, stderr)
 	}

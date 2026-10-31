@@ -1,39 +1,61 @@
 name: release
 
+# Publishes a release after a merge to main whose CI run passed. The version comes
+# from the commits since the latest tag; see .github/scripts/next-version.sh.
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
     name: publish GitHub Release
-    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: homelab
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Compute next version
+        id: version
+        run: |
+          tag=$(.github/scripts/next-version.sh "${{ github.event.workflow_run.head_sha }}")
+          if [ -z "$tag" ]; then
+            echo "No releasable commits since the last tag; skipping."
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Build binary
-        run: make build
+        if: steps.version.outputs.tag != ''
+        run: |
+          make build VERSION="${{ steps.version.outputs.tag }}"
+          mkdir -p dist
+          cp build/pvdu dist/pvdu-linux-amd64
+          (cd dist && sha256sum pvdu-linux-amd64 > checksums.txt)
 
-      - name: Unit tests
-        run: make test-unit
-
-      - name: Publish GitHub Release
+      - name: Publish release
+        if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            build/pvdu \
-            --title "pvdu ${{ github.ref_name }}" \
+          gh release create "${{ steps.version.outputs.tag }}" \
+            dist/pvdu-linux-amd64 dist/checksums.txt \
+            --target "${{ github.event.workflow_run.head_sha }}" \
+            --title "pvdu ${{ steps.version.outputs.tag }}" \
             --generate-notes
