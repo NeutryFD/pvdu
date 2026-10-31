@@ -14,10 +14,46 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Stages run in order: lint -> build -> unit tests -> integration (homelab).
+# Every job uses the homelab self-hosted runner scale set.
 jobs:
+  # Decides whether the slow e2e stage is needed. It never blocks the stages.
+  changes:
+    name: detect changes
+    runs-on: homelab
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      cluster: ${{ steps.filter.outputs.cluster }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh pr diff "$PR" --name-only --repo "$GITHUB_REPOSITORY")
+          # Documentation and Dependabot config never need a cluster.
+          other=$(echo "$files" | grep -Ev '^(.*\.md|LICENSE|\.github/dependabot\.yml)$' || true)
+          # Dependabot Actions bumps only touch workflow files.
+          if [ "$ACTOR" = "dependabot[bot]" ]; then
+            other=$(echo "$other" | grep -Ev '^\.github/workflows/' || true)
+          fi
+          if [ -z "$other" ]; then
+            echo "cluster=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: homelab
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -35,10 +71,11 @@ jobs:
         with:
           version: v2.15.0
 
-  unit:
-    name: unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  build:
+    name: build
+    needs: lint
+    runs-on: homelab
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -53,12 +90,10 @@ jobs:
       - name: Vet
         run: make vet
 
-      - name: Unit tests
-        run: make test-unit
-
-  integration:
-    name: integration tests (KinD)
-    runs-on: ubuntu-latest
+  unit:
+    name: unit tests
+    needs: build
+    runs-on: homelab
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -68,25 +103,51 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Start KinD cluster
-        run: |
-          curl -sSLo kind https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64
-          chmod +x kind
-          ./kind create cluster --wait 120s
+      - name: Unit tests
+        run: make test-unit
+
+  integration:
+    name: integration tests (homelab)
+    needs: [unit, changes]
+    if: ${{ needs.changes.outputs.cluster == 'true' }}
+    runs-on: homelab
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Integration tests
+        env:
+          PVDU_E2E_NAMESPACE: arc-runners
         run: make test-integration
 
-  # Single required check for branch protection: it fails unless every job above passed.
+  # Single required check for branch protection. An e2e stage skipped on purpose
+  # (docs-only changes) is fine; a failed or cancelled stage is not, and a failure
+  # in an earlier stage skips the later ones, so it is caught here too.
   ci-success:
     name: ci-success
     if: ${{ always() }}
-    needs: [lint, unit, integration]
-    runs-on: ubuntu-latest
+    needs: [changes, lint, build, unit, integration]
+    runs-on: homelab
     steps:
-      - name: Require all jobs to succeed
+      - name: Require every stage to succeed
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
-            echo "One or more required jobs did not succeed."
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "A stage failed or was cancelled."
+            exit 1
+          fi
+          # Required stages must run; only deliberately filtered integration may skip.
+          for stage in "${{ needs.changes.result }}" "${{ needs.lint.result }}" "${{ needs.build.result }}" "${{ needs.unit.result }}"; do
+            if [ "$stage" != "success" ]; then
+              echo "A required stage did not run to success: $stage"
+              exit 1
+            fi
+          done
+          if [ "${{ needs.changes.outputs.cluster }}" = "true" ] && [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "Required integration tests did not succeed."
             exit 1
           fi
