@@ -18,7 +18,9 @@ concurrency:
 jobs:
   release:
     name: publish GitHub Release
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: homelab
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
