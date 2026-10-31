@@ -182,8 +182,13 @@ func (e *Engine) GetPVC(ctx context.Context, namespace, name string) (*kube.PVCI
 // whole-volume mount when one exists.
 func NewResult(pvc kube.PVCInfo) *model.ScanResult {
 	result := &model.ScanResult{Namespace: pvc.Namespace, PVCName: pvc.Name, RequestedBytes: pvc.RequestedBytes, RequestedStr: pvc.RequestedStr, PVBytes: pvc.PVBytes, Status: model.StatusPending}
+	result.PVName, result.StorageClass = pvc.PVName, pvc.StorageClass
+	if len(pvc.Mounts) > 0 {
+		result.MountingPodName = pvc.Mounts[0].PodName
+	}
 	for _, mount := range pvc.Mounts {
 		if mount.WholeVolume() {
+			result.MountingPodName = mount.PodName
 			result.PodName, result.ScanPath = mount.PodName, mount.MountPath
 			break
 		}
