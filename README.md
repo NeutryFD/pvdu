@@ -30,7 +30,7 @@ make build
 | `--image` | `-i` | `alpine:3.23` | Image for temp pods |
 | `--timeout` | `-t` | `120s` | Budget for each attempt; forced fallback gets a fresh budget |
 | `--cleanup-timeout` | | `10s` | Independent temporary-pod deletion budget |
-| `--concurrency` | `-c` | `3` | Max parallel PVC scans |
+| `--concurrency` | `-c` | `3` | Max parallel PVC scans (`0` = no limit) |
 | `--max-depth` | `-d` | `0` (unlimited) | Scanner directory depth |
 | `--exclude` | `-e` | | Paths to exclude from scan (repeatable) |
 | `--workers` | `-w` | `0` (auto) | Scanner parallel workers |
@@ -38,6 +38,8 @@ make build
 | `--kubeconfig` | | | Path to kubeconfig file |
 | `--output` | `-o` | `default` | Output format: `default`, `table`, `json`, `yaml` |
 | `--log-level` | | `warn` | Progress detail: `debug`, `info`, `warn`, `error` |
+| `--tui` | | | Browse PVCs interactively and choose which to scan; not combinable with `-o json`/`yaml` |
+| `--theme` | | `dracula` | TUI colour theme: `dracula`, `catppuccin`, `nord`, `gruvbox`, `tokyonight` |
 | `--version` | | | Print version and exit |
 
 ## Output formats
