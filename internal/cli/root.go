@@ -53,7 +53,7 @@ func NewCommand(deps Dependencies) *cobra.Command {
 	f.BoolVarP(&o.force, "force", "f", false, "Use a temporary pod if an existing whole-volume mount scan fails")
 	f.DurationVarP(&o.timeout, "timeout", "t", o.timeout, "Budget for each scan attempt; forced fallback gets a fresh budget")
 	f.DurationVar(&o.cleanupTimeout, "cleanup-timeout", o.cleanupTimeout, "Independent temporary-pod cleanup budget")
-	f.IntVarP(&o.concurrency, "concurrency", "c", o.concurrency, "Maximum concurrent PVC scans")
+	f.IntVarP(&o.concurrency, "concurrency", "c", o.concurrency, "Maximum concurrent PVC scans (0 = no limit)")
 	f.IntVarP(&o.maxDepth, "max-depth", "d", 0, "Directory depth (0 = unlimited)")
 	f.IntVarP(&o.workers, "workers", "w", 0, "Scanner workers (0 = auto)")
 	f.StringSliceVarP(&o.excludes, "exclude", "e", nil, "Paths excluded from totals (repeatable)")
@@ -64,8 +64,8 @@ func NewCommand(deps Dependencies) *cobra.Command {
 }
 
 func (o options) validate(explicitNamespace bool) error {
-	if o.concurrency <= 0 {
-		return fmt.Errorf("--concurrency must be positive")
+	if o.concurrency < 0 {
+		return fmt.Errorf("--concurrency cannot be negative; 0 means no limit")
 	}
 	if o.timeout <= 0 || o.cleanupTimeout <= 0 {
 		return fmt.Errorf("--timeout and --cleanup-timeout must be positive")
