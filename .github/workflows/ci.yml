@@ -57,7 +57,7 @@ jobs:
         run: make test-unit
 
   integration:
-    name: integration tests (KinD)
+    name: integration tests (homelab)
     runs-on: homelab
     timeout-minutes: 20
     steps:
@@ -68,13 +68,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Start KinD cluster
-        run: |
-          curl -sSLo kind https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64
-          chmod +x kind
-          ./kind create cluster --wait 120s
-
       - name: Integration tests
+        env:
+          PVDU_E2E_NAMESPACE: arc-runners
         run: make test-integration
 
   # Single required check for branch protection: it fails unless every job above passed.
