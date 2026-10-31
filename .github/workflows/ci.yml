@@ -14,7 +14,44 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Stages run in order: lint -> build -> unit tests -> e2e (KinD). Each stage only
+# starts when the previous one passed. Set the repository variable CI_RUNNER
+# (for example "self-hosted") to move every job off GitHub-hosted runners.
 jobs:
+  # Decides whether the slow e2e stage is needed. It never blocks the stages.
+  changes:
+    name: detect changes
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      cluster: ${{ steps.filter.outputs.cluster }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh pr diff "$PR" --name-only --repo "$GITHUB_REPOSITORY")
+          # Documentation and Dependabot config never need a cluster.
+          other=$(echo "$files" | grep -Ev '^(.*\.md|LICENSE|\.github/dependabot\.yml)$' || true)
+          # Dependabot Actions bumps only touch workflow files.
+          if [ "$ACTOR" = "dependabot[bot]" ]; then
+            other=$(echo "$other" | grep -Ev '^\.github/workflows/' || true)
+          fi
+          if [ -z "$other" ]; then
+            echo "cluster=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "cluster=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: lint
     runs-on: homelab
@@ -53,6 +90,19 @@ jobs:
       - name: Vet
         run: make vet
 
+  unit:
+    name: 3 - unit tests
+    needs: build
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Unit tests
         run: make test-unit
 
@@ -73,16 +123,25 @@ jobs:
           PVDU_E2E_NAMESPACE: arc-runners
         run: make test-integration
 
-  # Single required check for branch protection: it fails unless every job above passed.
+  # Single required check for branch protection. An e2e stage skipped on purpose
+  # (docs-only changes) is fine; a failed or cancelled stage is not, and a failure
+  # in an earlier stage skips the later ones, so it is caught here too.
   ci-success:
     name: ci-success
     if: ${{ always() }}
     needs: [lint, unit, integration]
     runs-on: homelab
     steps:
-      - name: Require all jobs to succeed
+      - name: Require every stage to succeed
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
-            echo "One or more required jobs did not succeed."
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "A stage failed or was cancelled."
             exit 1
           fi
+          # Build and unit must have really run: a skipped one means an earlier stage failed.
+          for stage in "${{ needs.lint.result }}" "${{ needs.build.result }}" "${{ needs.unit.result }}"; do
+            if [ "$stage" != "success" ]; then
+              echo "A required stage did not run to success: $stage"
+              exit 1
+            fi
+          done
