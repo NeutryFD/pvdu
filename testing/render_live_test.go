@@ -46,15 +46,16 @@ assert '\x1b[?1049h' not in text and '\x1b[2J' not in text, text
 assert text.count('\x1b[?25h') == 1, text
 frames = re.split(r'\x1b\[\d+A\r\x1b\[J', text.replace('\x1b[?25l', ''))
 assert len(frames) >= 8, text
-assert frames[-1].count('NAMESPACE') == 1, frames[-1]
+assert frames[-1].count('REQUESTED') == 1, frames[-1]
+assert 'NAMESPACE' not in frames[-1], frames[-1]
 for frame in frames[:-1]:
-    assert frame.count('NAMESPACE') == 1, frame
+    assert frame.count('POD') >= 1, frame
     assert all(len(line) <= 59 for line in frame.splitlines()), frame
     assert 'Scanning…' not in frame, frame
-for state in ['WAITING', 'SCANNING', 'CREATING POD', 'WAITING POD', 'POD READY', 'UPLOADING', 'DONE']:
+for state in ['QUEUED', 'SCANNING', 'CREATING POD', 'WAITING POD', 'POD READY', 'UPLOADING', 'DONE']:
     assert state in text, (state, text)
 assert text.index('CREATING POD') < text.index('WAITING POD') < text.index('POD READY') < text.index('UPLOADING'), text
-assert 'temporary-scanner' in frames[-1], frames[-1]
+assert 'app' in frames[-1].split('\nDebug:')[0], frames[-1]
 assert '\nDebug:\n' in frames[-1] and 'argv=[sh -c scanner]' in frames[-1], frames[-1]
 assert all('argv=' not in frame for frame in frames[:-1]), frames
 `
@@ -74,7 +75,7 @@ func TestLiveTableUpdatesStatusAndDefersDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "STATUS") || !strings.Contains(output.String(), "WAITING") {
+	if !strings.Contains(output.String(), "STATUS") || !strings.Contains(output.String(), "QUEUED") {
 		t.Fatalf("initial output missing status column or waiting row: %s", output.String())
 	}
 

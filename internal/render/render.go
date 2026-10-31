@@ -10,8 +10,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TableOptions controls contextual columns in human-readable output.
+type TableOptions struct {
+	ShowNamespace bool
+}
+
+func showNamespace(options []TableOptions) bool {
+	return len(options) == 0 || options[0].ShowNamespace
+}
+
 // WriteResults preserves the structured schema even when no PVCs were found.
-func WriteResults(w io.Writer, format string, results []*model.ScanResult) error {
+func WriteResults(w io.Writer, format string, results []*model.ScanResult, options ...TableOptions) error {
 	if results == nil {
 		results = []*model.ScanResult{}
 	}
@@ -25,7 +34,7 @@ func WriteResults(w io.Writer, format string, results []*model.ScanResult) error
 		defer encoder.Close()
 		return encoder.Encode(results)
 	case "default", "table":
-		_, err := io.WriteString(w, render(results, format == "table"))
+		_, err := io.WriteString(w, renderTable(results, format == "table", true, options...))
 		return err
 	default:
 		return fmt.Errorf("invalid output format %q", format)

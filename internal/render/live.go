@@ -21,10 +21,11 @@ type LiveTable struct {
 	lines    int
 	err      error
 	terminal *os.File
+	options  []TableOptions
 }
 
-func NewLiveTable(w io.Writer, format string, results []*model.ScanResult) (*LiveTable, error) {
-	t := &LiveTable{w: w, borders: format == "table", rows: cloneResults(results)}
+func NewLiveTable(w io.Writer, format string, results []*model.ScanResult, options ...TableOptions) (*LiveTable, error) {
+	t := &LiveTable{w: w, borders: format == "table", rows: cloneResults(results), options: append([]TableOptions(nil), options...)}
 	if file, ok := w.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
 		t.terminal = file
 		if _, err := io.WriteString(w, "\033[?25l"); err != nil {
@@ -72,7 +73,7 @@ func (t *LiveTable) Finish() error {
 }
 
 func (t *LiveTable) draw(includeDiagnostics bool) error {
-	content := renderTable(t.rows, t.borders, includeDiagnostics)
+	content := renderTable(t.rows, t.borders, includeDiagnostics, t.options...)
 	if t.terminal != nil && !includeDiagnostics {
 		width, height, err := term.GetSize(int(t.terminal.Fd()))
 		if err != nil {
