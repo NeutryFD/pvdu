@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/neutry/pvdu/internal/engine"
 	"github.com/neutry/pvdu/internal/kube"
 	"github.com/neutry/pvdu/internal/model"
 	"github.com/neutry/pvdu/internal/render"
@@ -46,25 +47,40 @@ func newRunner(d Dependencies) *runner {
 	if d.BuildClient == nil {
 		d.BuildClient = kube.BuildClient
 	}
-	if d.ListPVCs == nil {
-		d.ListPVCs = kube.ListPVCs
-	}
-	if d.GetPVCByName == nil {
-		d.GetPVCByName = kube.GetPVCByName
-	}
-	if d.CreatePod == nil {
-		d.CreatePod = kube.CreateScanPod
-	}
-	if d.WaitForPodReady == nil {
-		d.WaitForPodReady = kube.WaitForPodReady
-	}
-	if d.DeletePod == nil {
-		d.DeletePod = kube.DeleteScanPod
-	}
-	if d.UploadAndScan == nil {
-		d.UploadAndScan = scanner.UploadAndScan
-	}
 	return &runner{options: defaultOptions(), deps: d, errOut: os.Stderr}
+}
+
+// newEngine passes the scan boundaries on; the engine fills in production
+// implementations for the omitted ones.
+func (r *runner) newEngine(client kubernetes.Interface, config *rest.Config) *engine.Engine {
+	o := r.options
+	return engine.New(client, config, engine.Options{
+		Image: o.image, Force: o.force, Timeout: o.timeout, CleanupTimeout: o.cleanupTimeout,
+		Concurrency: o.concurrency, MaxDepth: o.maxDepth, Workers: o.workers, Excludes: o.excludes,
+		Debug: o.logLevel == "debug",
+	}, engine.Dependencies{
+		ListPVCs: r.deps.ListPVCs, GetPVCByName: r.deps.GetPVCByName, CreatePod: r.deps.CreatePod,
+		WaitForPodReady: r.deps.WaitForPodReady, DeletePod: r.deps.DeletePod, UploadAndScan: r.deps.UploadAndScan,
+	})
+}
+
+// handle shows engine events on the live table or as log lines.
+func (r *runner) handle(event engine.Event) {
+	switch event.Kind {
+	case engine.EventStatus:
+		if r.liveTable != nil {
+			// Finish reports output errors after all scan workers have stopped.
+			_ = r.liveTable.Update(event.Index, event.Result)
+		}
+	case engine.EventDetail:
+		if r.options.logLevel == "debug" {
+			r.debugMu.Lock()
+			r.debugDetails = append(r.debugDetails, event.Detail)
+			r.debugMu.Unlock()
+		}
+	case engine.EventLog:
+		r.messageAt(event.Level, event.Message)
+	}
 }
 
 func (r *runner) run(cmd *cobra.Command) error {
@@ -83,6 +99,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("build k8s client: %w", err)
 	}
+	scans := r.newEngine(client, config)
 	ns := o.namespace
 	if o.allNamespaces {
 		ns = ""
@@ -91,13 +108,13 @@ func (r *runner) run(cmd *cobra.Command) error {
 	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, o.timeout)
 	defer discoveryCancel()
 	if o.pvc != "" {
-		pvc, err := r.deps.GetPVCByName(discoveryCtx, client, ns, o.pvc)
+		pvc, err := scans.GetPVC(discoveryCtx, ns, o.pvc)
 		if err != nil {
 			return fmt.Errorf("get PVC: %w", err)
 		}
 		pvcs = []kube.PVCInfo{*pvc}
 	} else {
-		pvcs, err = r.deps.ListPVCs(discoveryCtx, client, ns)
+		pvcs, err = scans.ListPVCs(discoveryCtx, ns)
 		if err != nil {
 			return fmt.Errorf("list PVCs: %w", err)
 		}
@@ -105,14 +122,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 	discoveryCancel()
 	results := make([]*model.ScanResult, len(pvcs))
 	for i, pvc := range pvcs {
-		result := &model.ScanResult{Namespace: pvc.Namespace, PVCName: pvc.Name, RequestedBytes: pvc.RequestedBytes, RequestedStr: pvc.RequestedStr, PVBytes: pvc.PVBytes, Status: model.StatusPending}
-		for _, mount := range pvc.Mounts {
-			if mount.WholeVolume() {
-				result.PodName, result.ScanPath = mount.PodName, mount.MountPath
-				break
-			}
-		}
-		results[i] = result
+		results[i] = engine.NewResult(pvc)
 	}
 	if o.output == "default" || o.output == "table" {
 		if file, ok := cmd.OutOrStdout().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
@@ -124,7 +134,7 @@ func (r *runner) run(cmd *cobra.Command) error {
 			defer func() { r.liveTable = nil }()
 		}
 	}
-	r.scanAll(ctx, client, config, results, pvcs)
+	scans.ScanAll(ctx, pvcs, results, r.handle)
 	if r.liveTable != nil {
 		if err := r.liveTable.Finish(); err != nil {
 			return fmt.Errorf("finish live table: %w", err)
