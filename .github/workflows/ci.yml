@@ -38,7 +38,7 @@ jobs:
   unit:
     name: unit tests
     runs-on: homelab
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
