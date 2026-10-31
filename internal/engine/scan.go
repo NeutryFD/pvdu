@@ -19,14 +19,15 @@ func (e *Engine) ScanAll(ctx context.Context, pvcs []kube.PVCInfo, results []*mo
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for i, pvc := range pvcs {
-		if !e.acquire(ctx) {
+		release, ok := e.acquire(ctx)
+		if !ok {
 			return
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer e.release()
-			e.scan(ctx, i, results[i], pvc, handle)
+			defer release()
+			e.scan(ctx, i, results[i], pvc, nil, handle)
 		}()
 	}
 }
@@ -34,43 +35,73 @@ func (e *Engine) ScanAll(ctx context.Context, pvcs []kube.PVCInfo, results []*mo
 // Scan scans one PVC into result once a concurrency slot is free, and returns
 // false without scanning when ctx ends first.
 func (e *Engine) Scan(ctx context.Context, index int, result *model.ScanResult, pvc kube.PVCInfo, handle Handler) bool {
-	if !e.acquire(ctx) {
+	return e.scanInSlot(ctx, index, result, pvc, nil, handle)
+}
+
+// ScanForced is Scan with the temporary-pod fallback enabled, whatever
+// Options.Force says.
+func (e *Engine) ScanForced(ctx context.Context, index int, result *model.ScanResult, pvc kube.PVCInfo, handle Handler) bool {
+	force := true
+	return e.scanInSlot(ctx, index, result, pvc, &force, handle)
+}
+
+func (e *Engine) scanInSlot(ctx context.Context, index int, result *model.ScanResult, pvc kube.PVCInfo, force *bool, handle Handler) bool {
+	release, ok := e.acquire(ctx)
+	if !ok {
 		return false
 	}
-	defer e.release()
-	e.scan(ctx, index, result, pvc, handle)
+	defer release()
+	e.scan(ctx, index, result, pvc, force, handle)
 	return true
 }
 
-func (e *Engine) acquire(ctx context.Context) bool {
-	if ctx.Err() != nil {
-		return false
+// acquire waits for a concurrency slot and returns the function that frees
+// it. A concurrency change while waiting moves the wait to the new limit.
+func (e *Engine) acquire(ctx context.Context) (func(), bool) {
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		e.mu.Lock()
+		sem, changed := e.sem, e.changed
+		e.mu.Unlock()
+		if sem == nil {
+			return func() {}, true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-changed:
+			continue
+		case sem <- struct{}{}:
+		}
+		if ctx.Err() != nil {
+			<-sem
+			return nil, false
+		}
+		return func() { <-sem }, true
 	}
-	select {
-	case <-ctx.Done():
-		return false
-	case e.sem <- struct{}{}:
-	}
-	if ctx.Err() != nil {
-		e.release()
-		return false
-	}
-	return true
 }
-
-func (e *Engine) release() { <-e.sem }
 
 // scanTask is the state of one PVC scan.
 type scanTask struct {
-	e      *Engine
+	e *Engine
+	// opts are the engine's options when the scan started.
+	opts   Options
 	index  int
 	result *model.ScanResult
 	pvc    kube.PVCInfo
+	force  bool
 	handle Handler
 }
 
-func (e *Engine) scan(ctx context.Context, index int, result *model.ScanResult, pvc kube.PVCInfo, handle Handler) {
-	t := &scanTask{e: e, index: index, result: result, pvc: pvc, handle: handle}
+// scan runs one scan; a nil force follows Options.Force.
+func (e *Engine) scan(ctx context.Context, index int, result *model.ScanResult, pvc kube.PVCInfo, force *bool, handle Handler) {
+	t := &scanTask{e: e, opts: e.Options(), index: index, result: result, pvc: pvc, handle: handle}
+	t.force = t.opts.Force
+	if force != nil {
+		t.force = *force
+	}
 	// A panic in one scan must not kill the others or leave the receiver waiting
 	// for a final status. Deferred pod cleanup has already run while unwinding.
 	defer func() {
@@ -121,18 +152,18 @@ func (t *scanTask) run(ctx context.Context) {
 			continue
 		}
 		result.PodName, result.ScanPath = mount.PodName, mount.MountPath
-		scanCtx, cancel := context.WithTimeout(ctx, e.options.Timeout)
+		scanCtx, cancel := context.WithTimeout(ctx, t.opts.Timeout)
 		t.log(slog.LevelInfo, fmt.Sprintf("%s/%s: scanning %s:%s", pvc.Namespace, pvc.Name, mount.PodName, mount.MountPath))
 		// Never upload into application storage: a failed scratch upload can use
 		// a temporary pod with Force, but cannot overwrite PVC contents.
-		sr, err := e.deps.UploadAndScan(scanCtx, e.client, e.config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, e.options.MaxDepth, e.options.Excludes, e.options.Workers)
+		sr, err := e.deps.UploadAndScan(scanCtx, e.client, e.config, pvc.Namespace, mount.PodName, mount.ContainerName, "/tmp", mount.MountPath, &pvc, t.opts.MaxDepth, t.opts.Excludes, t.opts.Workers)
 		err = scanError(sr, err)
 		if err != nil {
 			switch {
 			case ctx.Err() != nil:
 				t.fail(ctx, ctx.Err())
-			case e.options.Force:
-				if e.options.Debug {
+			case t.force:
+				if t.opts.Debug {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("existing pod scan failed; temporary-pod fallback: %v", err))
 				}
 				cancel()
@@ -160,12 +191,12 @@ func (t *scanTask) scanWithTempPod(ctx context.Context) {
 		t.fail(ctx, ctx.Err())
 		return
 	}
-	opCtx, cancel := context.WithTimeout(ctx, e.options.Timeout)
+	opCtx, cancel := context.WithTimeout(ctx, t.opts.Timeout)
 	defer cancel()
 	result.PodName, result.ScanPath = "", "/mnt"
 	scanner.NotifyProgress(ctx, model.StatusCreatingPod, "")
 	t.log(slog.LevelInfo, fmt.Sprintf("%s/%s: creating temporary pod", pvc.Namespace, pvc.Name))
-	pod, err := e.deps.CreatePod(opCtx, e.client, pvc, e.options.Image)
+	pod, err := e.deps.CreatePod(opCtx, e.client, pvc, t.opts.Image)
 	if err != nil {
 		t.fail(opCtx, err)
 		return
@@ -173,20 +204,20 @@ func (t *scanTask) scanWithTempPod(ctx context.Context) {
 	result.PodName, result.ScanPath = pod.Name, "/mnt"
 	scanner.NotifyProgress(ctx, model.StatusWaitingPod, "")
 	defer func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), e.options.CleanupTimeout)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), t.opts.CleanupTimeout)
 		defer cleanupCancel()
 		if err := e.deps.DeletePod(cleanupCtx, e.client, pvc.Namespace, pod); err != nil {
 			warning := fmt.Sprintf("delete temp pod failed: %s/%s: %v", pvc.Namespace, pod.Name, err)
 			result.Warnings = append(result.Warnings, warning)
 		}
 	}()
-	if err := e.deps.WaitForPodReady(opCtx, e.client, pvc.Namespace, pod.Name, e.options.Timeout); err != nil {
+	if err := e.deps.WaitForPodReady(opCtx, e.client, pvc.Namespace, pod.Name, t.opts.Timeout); err != nil {
 		t.fail(opCtx, err)
 		return
 	}
 	scanner.NotifyProgress(ctx, model.StatusPodReady, "")
 	t.log(slog.LevelInfo, fmt.Sprintf("%s/%s: uploading scanner and scanning temporary pod %s:/mnt", pvc.Namespace, pvc.Name, pod.Name))
-	sr, err := e.deps.UploadAndScan(opCtx, e.client, e.config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, e.options.MaxDepth, e.options.Excludes, e.options.Workers)
+	sr, err := e.deps.UploadAndScan(opCtx, e.client, e.config, pvc.Namespace, pod.Name, "scanner", "/tmp", "/mnt", &pvc, t.opts.MaxDepth, t.opts.Excludes, t.opts.Workers)
 	if ctx.Err() != nil {
 		t.fail(ctx, ctx.Err())
 		return
@@ -203,7 +234,7 @@ func (t *scanTask) fail(ctx context.Context, err error) {
 	if ctx.Err() == context.Canceled {
 		message = "interrupted"
 	} else if ctx.Err() == context.DeadlineExceeded {
-		message = fmt.Sprintf("timed out after %s (try --timeout/-t)", t.e.options.Timeout)
+		message = fmt.Sprintf("timed out after %s (try --timeout/-t)", t.opts.Timeout)
 	}
 	t.result.Status, t.result.Error = model.StatusError, message
 }

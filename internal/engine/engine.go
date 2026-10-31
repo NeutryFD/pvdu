@@ -4,7 +4,10 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/neutry/pvdu/internal/kube"
@@ -16,6 +19,7 @@ import (
 
 // Dependencies describes external boundaries; omitted functions use production implementations.
 type Dependencies struct {
+	ListNamespaces  func(context.Context, kubernetes.Interface) ([]string, error)
 	ListPVCs        func(context.Context, kubernetes.Interface, string) ([]kube.PVCInfo, error)
 	GetPVCByName    func(context.Context, kubernetes.Interface, string, string) (*kube.PVCInfo, error)
 	CreatePod       func(context.Context, kubernetes.Interface, kube.PVCInfo, string) (kube.PodRef, error)
@@ -30,10 +34,11 @@ type Options struct {
 	Force          bool
 	Timeout        time.Duration
 	CleanupTimeout time.Duration
-	Concurrency    int
-	MaxDepth       int
-	Workers        int
-	Excludes       []string
+	// Concurrency limits the scans running at once; 0 means no limit.
+	Concurrency int
+	MaxDepth    int
+	Workers     int
+	Excludes    []string
 	// Debug keeps the existing-pod error as a warning when the temporary-pod
 	// fallback runs.
 	Debug bool
@@ -67,14 +72,69 @@ type Handler func(Event)
 
 // Engine scans PVCs with a shared concurrency limit.
 type Engine struct {
-	client  kubernetes.Interface
-	config  *rest.Config
+	client kubernetes.Interface
+	config *rest.Config
+	deps   Dependencies
+
+	mu      sync.Mutex
 	options Options
-	deps    Dependencies
+	// sem holds one token per running scan. SetOptions replaces it when the
+	// concurrency changes and closes changed, so waiting scans move to the
+	// new limit; running scans release the token of the sem they took. It is
+	// nil when there is no limit.
 	sem     chan struct{}
+	changed chan struct{}
+}
+
+// Validate reports options a scan cannot use.
+func (o Options) Validate() error {
+	switch {
+	case o.Image == "":
+		return fmt.Errorf("image cannot be empty")
+	case o.Concurrency < 0:
+		return fmt.Errorf("concurrency cannot be negative; 0 means no limit")
+	case o.Timeout <= 0 || o.CleanupTimeout <= 0:
+		return fmt.Errorf("timeout and cleanup timeout must be positive")
+	case o.MaxDepth < 0 || o.Workers < 0:
+		return fmt.Errorf("max depth and workers must be nonnegative")
+	}
+	_, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.MaxDepth, o.Excludes, o.Workers)
+	return err
+}
+
+// Options returns the settings new scans use.
+func (e *Engine) Options() Options {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	o := e.options
+	o.Excludes = slices.Clone(o.Excludes)
+	return o
+}
+
+// SetOptions changes the settings of scans that start from now on; running
+// scans keep theirs. A new concurrency also applies to scans waiting for a
+// slot, while running scans still count against the old limit until they
+// finish.
+func (e *Engine) SetOptions(o Options) error {
+	if err := o.Validate(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	o.Excludes = slices.Clone(o.Excludes)
+	if o.Concurrency != e.options.Concurrency {
+		e.sem = newSem(o.Concurrency)
+		close(e.changed)
+		e.changed = make(chan struct{})
+	}
+	e.options = o
+	return nil
 }
 
 func New(client kubernetes.Interface, config *rest.Config, options Options, deps Dependencies) *Engine {
+	if deps.ListNamespaces == nil {
+		deps.ListNamespaces = kube.ListNamespaces
+	}
 	if deps.ListPVCs == nil {
 		deps.ListPVCs = kube.ListPVCs
 	}
@@ -93,8 +153,21 @@ func New(client kubernetes.Interface, config *rest.Config, options Options, deps
 	if deps.UploadAndScan == nil {
 		deps.UploadAndScan = scanner.UploadAndScan
 	}
-	options.Concurrency = max(1, options.Concurrency)
-	return &Engine{client: client, config: config, options: options, deps: deps, sem: make(chan struct{}, options.Concurrency)}
+	options.Concurrency = max(0, options.Concurrency)
+	return &Engine{client: client, config: config, options: options, deps: deps,
+		sem: newSem(options.Concurrency), changed: make(chan struct{})}
+}
+
+// newSem returns the slots of a concurrency limit, or nil for 0, no limit.
+func newSem(concurrency int) chan struct{} {
+	if concurrency == 0 {
+		return nil
+	}
+	return make(chan struct{}, concurrency)
+}
+
+func (e *Engine) ListNamespaces(ctx context.Context) ([]string, error) {
+	return e.deps.ListNamespaces(ctx, e.client)
 }
 
 func (e *Engine) ListPVCs(ctx context.Context, namespace string) ([]kube.PVCInfo, error) {
