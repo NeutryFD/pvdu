@@ -3,8 +3,6 @@ name: ci
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +14,7 @@ concurrency:
 
 # Stages run in order: lint -> build -> unit tests -> integration (homelab).
 # Every job uses the homelab self-hosted runner scale set.
+# The main ruleset requires ci-success and an up-to-date PR before merging.
 jobs:
   # Decides whether the slow e2e stage is needed. It never blocks the stages.
   changes:

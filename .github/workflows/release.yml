@@ -1,11 +1,9 @@
 name: release
 
-# Publishes a release after a merge to main whose CI run passed. The version comes
-# from the commits since the latest tag; see .github/scripts/next-version.sh.
+# Publishes after merging a PR validated by main's required, up-to-date CI checks.
+# The version comes from commits since the latest tag; see .github/scripts/next-version.sh.
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions:
@@ -18,13 +16,12 @@ concurrency:
 jobs:
   release:
     name: publish GitHub Release
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: homelab
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-go@v7
@@ -35,7 +32,7 @@ jobs:
       - name: Compute next version
         id: version
         run: |
-          tag=$(.github/scripts/next-version.sh "${{ github.event.workflow_run.head_sha }}")
+          tag=$(.github/scripts/next-version.sh "${{ github.sha }}")
           if [ -z "$tag" ]; then
             echo "No releasable commits since the last tag; skipping."
           fi
@@ -56,6 +53,6 @@ jobs:
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
             dist/pvdu-linux-amd64 dist/checksums.txt \
-            --target "${{ github.event.workflow_run.head_sha }}" \
+            --target "${{ github.sha }}" \
             --title "pvdu ${{ steps.version.outputs.tag }}" \
             --generate-notes
