@@ -47,13 +47,17 @@ func (m *Model) onNamespaces(msg namespacesMsg) {
 	}
 }
 
+// allNamespacesLabel is the picker entry that selects every namespace.
+const allNamespacesLabel = "all namespaces"
+
 // nsOptions are the namespaces matching the typed text, after the entry for
 // every namespace.
 func (m *Model) nsOptions() []nsOption {
 	needle := strings.ToLower(strings.TrimSpace(m.input.Value()))
 	var options []nsOption
-	if strings.Contains("all namespaces", needle) {
-		options = append(options, nsOption{label: "all namespaces", value: ""})
+	// The entry stays while the typed text is part of its label, e.g. "all".
+	if strings.Contains(allNamespacesLabel, needle) {
+		options = append(options, nsOption{label: allNamespacesLabel, value: ""})
 	}
 	for _, name := range m.nsNames {
 		if strings.Contains(strings.ToLower(name), needle) {
