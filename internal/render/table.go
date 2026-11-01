@@ -5,7 +5,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/NeutryFD/dirwalker"
 	"github.com/neutry/pvdu/internal/model"
 )
 
@@ -13,29 +12,23 @@ func render(results []*model.ScanResult, borders bool) string {
 	return renderTable(results, borders, true)
 }
 
-func renderTable(results []*model.ScanResult, borders, diagnosticsEnabled bool) string {
+func renderTable(results []*model.ScanResult, borders, diagnosticsEnabled bool, options ...TableOptions) string {
 	if len(results) == 0 {
 		return "No PVCs found.\n"
 	}
-	rows := [][]string{{"NAMESPACE", "POD", "PVC", "PATH", "REQUESTED", "PV SIZE", "USED", "%", "STATUS"}}
+	columns := Columns(showNamespace(options))
+	headers := make([]string, len(columns))
+	for i, column := range columns {
+		headers[i] = column.Title
+	}
+	rows := [][]string{headers}
 	var diagnostics []string
 	for _, r := range results {
-		row := []string{r.Namespace, r.PodName, r.PVCName, r.ScanPath, r.RequestedStr, "-", "-", "-", statusLabel(r.Status)}
-		for i := range row {
-			if row[i] == "" {
-				row[i] = "-"
-			}
+		row := make([]string, len(columns))
+		for i, column := range columns {
+			row[i] = column.Value(*r)
 		}
-		if r.PVBytes > 0 {
-			row[5] = dirwalker.FormatBytesShort(r.PVBytes)
-		}
-		switch r.Status {
-		case model.StatusDone:
-			row[6] = dirwalker.FormatBytesShort(r.UsedBytes)
-			if r.RequestedBytes > 0 {
-				row[7] = fmt.Sprintf("%.0f%%", 100*float64(r.UsedBytes)/float64(r.RequestedBytes))
-			}
-		case model.StatusError:
+		if r.Status == model.StatusError {
 			if r.Error != "" {
 				diagnostics = append(diagnostics, fmt.Sprintf("%s/%s: %s", r.Namespace, r.PVCName, singleLine(r.Error)))
 			}
@@ -69,7 +62,7 @@ func renderTable(results []*model.ScanResult, borders, diagnosticsEnabled bool) 
 		}
 		for i, value := range row {
 			pad := strings.Repeat(" ", widths[i]-utf8.RuneCountInString(value))
-			if i >= 4 {
+			if columns[i].RightAlign {
 				b.WriteString(pad + value)
 			} else {
 				b.WriteString(value + pad)
@@ -95,10 +88,3 @@ func renderTable(results []*model.ScanResult, borders, diagnosticsEnabled bool) 
 }
 
 func singleLine(value string) string { return strings.Join(strings.Fields(value), " ") }
-
-func statusLabel(status model.ScanStatus) string {
-	if status == model.StatusPending {
-		return "WAITING"
-	}
-	return strings.ToUpper(string(status))
-}

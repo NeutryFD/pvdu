@@ -30,7 +30,7 @@ make build
 | `--image` | `-i` | `alpine:3.23` | Image for temp pods |
 | `--timeout` | `-t` | `120s` | Budget for each attempt; forced fallback gets a fresh budget |
 | `--cleanup-timeout` | | `10s` | Independent temporary-pod deletion budget |
-| `--concurrency` | `-c` | `3` | Max parallel PVC scans |
+| `--concurrency` | `-c` | `3` | Max parallel PVC scans (`0` = no limit) |
 | `--max-depth` | `-d` | `0` (unlimited) | Scanner directory depth |
 | `--exclude` | `-e` | | Paths to exclude from scan (repeatable) |
 | `--workers` | `-w` | `0` (auto) | Scanner parallel workers |
@@ -38,6 +38,8 @@ make build
 | `--kubeconfig` | | | Path to kubeconfig file |
 | `--output` | `-o` | `default` | Output format: `default`, `table`, `json`, `yaml` |
 | `--log-level` | | `warn` | Progress detail: `debug`, `info`, `warn`, `error` |
+| `--tui` | | | Browse PVCs interactively and choose which to scan; not combinable with `-o json`/`yaml` |
+| `--theme` | | `dracula` | TUI colour theme: `dracula`, `catppuccin`, `nord`, `gruvbox`, `tokyonight` |
 | `--version` | | | Print version and exit |
 
 ## Output formats
@@ -49,9 +51,9 @@ make build
 ./build/pvdu -n default -o yaml      # YAML output
 ```
 
-The `default` and `table` formats show each PVC on one line with columns: NAMESPACE, POD, PVC, PATH, REQUESTED, PV SIZE, USED, %, STATUS. In an interactive terminal the table updates in place below the command, without switching to the alternate screen; redirected output prints one final table with no terminal escape sequences. JSON and YAML use matching field names and return an empty array when there are no PVCs. Failed scans appear in the results and cause a nonzero exit status. Cleanup warnings are included in `warnings` without replacing scan results.
+The `default`, `table` and TUI views share columns: POD, PVC, PV, STORAGE CLASS, REQUESTED, SIZE, USED, %, STATUS, preceded by NAMESPACE when browsing all namespaces (`-A`). POD identifies the application pod mounting the PVC, including after a temporary-pod scan; an unused PVC shows `-`. The TUI hides some name columns on narrow terminals. In an interactive terminal the CLI table updates in place below the command, without switching to the alternate screen; redirected output prints one final table with no terminal escape sequences. JSON and YAML retain the actual scan pod and path, use matching field names and return an empty array when there are no PVCs. Failed scans appear in the results and cause a nonzero exit status. Cleanup warnings are included in `warnings` without replacing scan results.
 
-STATUS moves through `WAITING`, `PREPARING`, `UPLOADING` and `SCANNING` to `DONE` or `ERROR`. Temporary-pod scans (`--force`) also show `CREATING POD`, `WAITING POD` and `POD READY`, and the temporary pod name appears as soon as it exists. `UPLOADING` covers sending the scanner into the pod, not PVC data; `SCANNING` begins when the pod reports that the scanner has started.
+STATUS moves through `QUEUED`, `PREPARING`, `UPLOADING` and `SCANNING` to `DONE` or `ERROR`; interrupted scans show `CANCELLED`. Temporary-pod scans (`--force`) also show `CREATING POD`, `WAITING POD` and `POD READY`; the TUI details identify the temporary scan pod. `UPLOADING` covers sending the scanner into the pod, not PVC data; `SCANNING` begins when the pod reports that the scanner has started.
 
 Errors and warnings are never printed between progress updates. They are collected and shown on one line each in a `Diagnostics:` section after the table. `--log-level` controls extra detail: the default `warn` is quiet, `info` adds scan and temporary-pod progress for non-interactive output, and `debug` adds a `Debug:` section after the results with the remote exec target and command, plus the reason an existing-pod scan fell back to a temporary pod.
 

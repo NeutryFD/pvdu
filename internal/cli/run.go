@@ -89,6 +89,9 @@ func (r *runner) run(cmd *cobra.Command) error {
 	if _, err := scanner.ExecCommand("/tmp/scanner", "/mnt", o.maxDepth, o.excludes, o.workers); err != nil {
 		return err
 	}
+	if o.tui {
+		return r.runTUI(cmd)
+	}
 	if file, ok := cmd.ErrOrStderr().(*os.File); ok {
 		r.terminal = term.IsTerminal(int(file.Fd()))
 	}
@@ -126,7 +129,9 @@ func (r *runner) run(cmd *cobra.Command) error {
 	}
 	if o.output == "default" || o.output == "table" {
 		if file, ok := cmd.OutOrStdout().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-			liveTable, err := render.NewLiveTable(cmd.OutOrStdout(), o.output, results)
+			liveTable, err := render.NewLiveTable(
+				cmd.OutOrStdout(), o.output, results, render.TableOptions{ShowNamespace: o.allNamespaces},
+			)
 			if err != nil {
 				return fmt.Errorf("start live table: %w", err)
 			}
@@ -145,7 +150,9 @@ func (r *runner) run(cmd *cobra.Command) error {
 		return ctx.Err()
 	}
 	if r.liveTable == nil {
-		if err := render.WriteResults(cmd.OutOrStdout(), o.output, results); err != nil {
+		if err := render.WriteResults(
+			cmd.OutOrStdout(), o.output, results, render.TableOptions{ShowNamespace: o.allNamespaces},
+		); err != nil {
 			return err
 		}
 	}
