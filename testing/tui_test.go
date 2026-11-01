@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/neutry/pvdu/internal/engine"
@@ -432,8 +433,9 @@ func TestTUIShowsPopupWhileListingPVCs(t *testing.T) {
 	row := slices.IndexFunc(lines, popup.MatchString)
 	// Trailing spaces are not rendered, so compare the left margin with the
 	// one a centred box of this width has on the 140-column test screen.
-	left := len([]rune(lines[row][:strings.Index(lines[row], "│")]))
-	box := len([]rune(lines[row][strings.Index(lines[row], "│"):strings.LastIndex(lines[row], "│")])) + 1
+	loc := popup.FindStringIndex(lines[row])
+	left := utf8.RuneCountInString(lines[row][:loc[0]])
+	box := utf8.RuneCountInString(lines[row][loc[0]:loc[1]])
 	if diff := row - len(lines)/2; diff < -2 || diff > 2 || left != (140-box)/2 {
 		t.Fatalf("loading pop-up not centred (row %d of %d, left margin %d, box %d):\n%s", row, len(lines), left, box, d.screen())
 	}
