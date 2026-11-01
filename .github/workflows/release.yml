@@ -5,6 +5,21 @@ name: release
 on:
   push:
     branches: [main]
+    # Keep in sync with the non-code filter in ci.yml.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - LICENSE
+      - .gitignore
+      - .editorconfig
+      - .github/dependabot.yml
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE**'
+      - '**.png'
+      - '**.jpg'
+      - '**.jpeg'
+      - '**.gif'
+      - '**.svg'
 
 permissions:
   contents: write

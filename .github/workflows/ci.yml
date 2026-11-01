@@ -16,7 +16,10 @@ concurrency:
 # Every job uses the homelab self-hosted runner scale set.
 # The main ruleset requires ci-success and an up-to-date PR before merging.
 jobs:
-  # Decides whether the slow e2e stage is needed. It never blocks the stages.
+  # Decides which stages are needed. Non-code PRs (docs, license, editor and
+  # Dependabot config, images) skip every stage; ci-success still reports.
+  # Path filters on the trigger are not used because they would leave the
+  # required ci-success check pending forever.
   changes:
     name: detect changes
     runs-on: homelab
@@ -25,6 +28,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      code: ${{ steps.filter.outputs.code }}
       cluster: ${{ steps.filter.outputs.cluster }}
     steps:
       - id: filter
@@ -34,17 +38,24 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           if [ -z "$PR" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
             echo "cluster=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files=$(gh pr diff "$PR" --name-only --repo "$GITHUB_REPOSITORY")
-          # Documentation and Dependabot config never need a cluster.
-          other=$(echo "$files" | grep -Ev '^(.*\.md|LICENSE|\.github/dependabot\.yml)$' || true)
-          # Dependabot Actions bumps only touch workflow files.
-          if [ "$ACTOR" = "dependabot[bot]" ]; then
-            other=$(echo "$other" | grep -Ev '^\.github/workflows/' || true)
+          # Files that cannot affect the build, tests or workflows.
+          code=$(echo "$files" | grep -Ev '^(.*\.md|docs/.*|LICENSE|\.gitignore|\.editorconfig|\.github/dependabot\.yml|\.github/(ISSUE_TEMPLATE|PULL_REQUEST_TEMPLATE)(/.*|\.md)?|.*\.(png|jpe?g|gif|svg))$' || true)
+          if [ -z "$code" ]; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "cluster=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          if [ -z "$other" ]; then
+          echo "code=true" >> "$GITHUB_OUTPUT"
+          # Dependabot Actions bumps only touch workflow files and need no cluster.
+          if [ "$ACTOR" = "dependabot[bot]" ]; then
+            code=$(echo "$code" | grep -Ev '^\.github/workflows/' || true)
+          fi
+          if [ -z "$code" ]; then
             echo "cluster=false" >> "$GITHUB_OUTPUT"
           else
             echo "cluster=true" >> "$GITHUB_OUTPUT"
@@ -52,6 +63,8 @@ jobs:
 
   lint:
     name: lint
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: homelab
     timeout-minutes: 10
     steps:
@@ -124,8 +137,8 @@ jobs:
           PVDU_E2E_NAMESPACE: arc-runners
         run: make test-integration
 
-  # Single required check for branch protection. An e2e stage skipped on purpose
-  # (docs-only changes) is fine; a failed or cancelled stage is not, and a failure
+  # Single required check for branch protection. Stages skipped on purpose
+  # (non-code changes) are fine; a failed or cancelled stage is not, and a failure
   # in an earlier stage skips the later ones, so it is caught here too.
   ci-success:
     name: ci-success
@@ -138,6 +151,14 @@ jobs:
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
             echo "A stage failed or was cancelled."
             exit 1
+          fi
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Change detection did not succeed."
+            exit 1
+          fi
+          if [ "${{ needs.changes.outputs.code }}" = "false" ]; then
+            echo "No code changes; stages skipped."
+            exit 0
           fi
           # Required stages must run; only deliberately filtered integration may skip.
           for stage in "${{ needs.changes.result }}" "${{ needs.lint.result }}" "${{ needs.build.result }}" "${{ needs.unit.result }}"; do
